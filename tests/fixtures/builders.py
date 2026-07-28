@@ -101,6 +101,8 @@ def make_pod(
     owner_kind: str = "ReplicaSet",
     owner_name: str | None = None,
     owner_uid: str = DEFAULT_REPLICASET_UID,
+    owner_controller: bool = True,
+    owner_api_version: str | None = None,
 ) -> V1Pod:
     """Build a pod. Pass owner_name to attach a single owner reference.
 
@@ -110,17 +112,24 @@ def make_pod(
     uid=None outright since UID is a required OwnerReference field, so an
     empty string is the correct way to simulate "unavailable" here. Leave
     container_statuses=None to simulate a pod with no reported status yet.
+    owner_controller=False simulates a non-controller owner reference (must
+    be ignored by ownership resolution). owner_api_version overrides the
+    default group/version guess, for testing API-group mismatches.
     """
     containers = containers or [make_container()]
     owner_references = None
     if owner_name:
+        if owner_api_version is not None:
+            api_version = owner_api_version
+        else:
+            api_version = "apps/v1" if owner_kind in {"ReplicaSet", "Deployment"} else "batch/v1"
         owner_references = [
             V1OwnerReference(
-                api_version="apps/v1" if owner_kind in {"ReplicaSet", "Deployment"} else "batch/v1",
+                api_version=api_version,
                 kind=owner_kind,
                 name=owner_name,
                 uid=owner_uid,
-                controller=True,
+                controller=owner_controller,
             )
         ]
     return V1Pod(
@@ -135,10 +144,11 @@ def make_deployment(
     namespace: str = "default",
     replicas: int = 3,
     containers: list[V1Container] | None = None,
+    uid: str | None = DEFAULT_DEPLOYMENT_UID,
 ) -> V1Deployment:
     containers = containers or [make_container()]
     return V1Deployment(
-        metadata=V1ObjectMeta(name=name, namespace=namespace),
+        metadata=V1ObjectMeta(name=name, namespace=namespace, uid=uid),
         spec=V1DeploymentSpec(
             replicas=replicas,
             selector=V1LabelSelector(match_labels={"app": name}),
@@ -153,20 +163,28 @@ def make_replicaset(
     uid: str | None = DEFAULT_REPLICASET_UID,
     deployment_owner_name: str | None = None,
     deployment_owner_uid: str = DEFAULT_DEPLOYMENT_UID,
+    deployment_owner_controller: bool = True,
+    deployment_owner_api_version: str | None = None,
 ) -> V1ReplicaSet:
     """Build a ReplicaSet. Pass deployment_owner_name to make it Deployment-owned;
 
     leave it None to represent a standalone ReplicaSet.
+    deployment_owner_controller=False simulates a non-controller owner
+    reference (must be ignored). deployment_owner_api_version overrides the
+    default "apps/v1", for testing API-group mismatches.
     """
     owner_references = None
     if deployment_owner_name:
+        api_version = (
+            deployment_owner_api_version if deployment_owner_api_version is not None else "apps/v1"
+        )
         owner_references = [
             V1OwnerReference(
-                api_version="apps/v1",
+                api_version=api_version,
                 kind="Deployment",
                 name=deployment_owner_name,
                 uid=deployment_owner_uid,
-                controller=True,
+                controller=deployment_owner_controller,
             )
         ]
     return V1ReplicaSet(

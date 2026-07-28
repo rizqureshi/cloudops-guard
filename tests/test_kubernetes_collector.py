@@ -206,16 +206,33 @@ def test_last_termination_reason_is_collected() -> None:
 
 
 # --- Ownership resolution via real owner references -------------------------
+#
+# These tests exercise the full, verified Pod -> ReplicaSet -> Deployment
+# chain: a ReplicaSet's claimed Deployment owner is only honored when a
+# Deployment with a matching (namespace, UID) -- or (namespace, name) when
+# UID is unavailable -- is actually present among the Deployments collected
+# in the same snapshot. An unverifiable claim (deleted, absent, or
+# UID-mismatched Deployment) is indistinguishable from a standalone
+# ReplicaSet: both yield owning_deployment=None so the pod still gets its
+# own container-level checks.
 
 
 def test_pod_owned_by_replicaset_is_attributed_to_its_deployment() -> None:
+    """1. Valid Pod -> ReplicaSet -> Deployment with matching UIDs throughout."""
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
     apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
         [
             make_replicaset(
-                "web-6c9c8f9d7", namespace="default", uid="rs-web", deployment_owner_name="web"
+                "web-6c9c8f9d7",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
             )
         ]
     )
@@ -235,21 +252,156 @@ def test_pod_owned_by_replicaset_is_attributed_to_its_deployment() -> None:
     assert snapshot.pods[0].owning_deployment == "web"
 
 
-def test_overlapping_deployment_names_are_disambiguated_by_owner_reference() -> None:
-    """Deployment "web" and "web-api" must not be confused by name-prefix matching."""
+def test_pod_owner_reference_with_controller_false_is_ignored() -> None:
+    """2. A Pod's ReplicaSet owner reference with controller=False must be ignored."""
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
     apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
         [
             make_replicaset(
-                "web-111", namespace="default", uid="rs-web", deployment_owner_name="web"
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [
+            make_pod(
+                "web-111-xyz",
+                namespace="default",
+                owner_name="web-111",
+                owner_uid="rs-web",
+                owner_controller=False,
+            )
+        ]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_replicaset_owner_reference_with_controller_false_is_ignored() -> None:
+    """3. A ReplicaSet's Deployment owner reference with controller=False must be ignored."""
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+                deployment_owner_controller=False,
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_replicaset_references_deployment_absent_from_snapshot() -> None:
+    """4. A ReplicaSet claims a Deployment owner that was deleted / not collected."""
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult([])  # deleted/absent
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_deployment_recreated_with_same_name_different_uid_is_not_attributed() -> None:
+    """5. A Deployment recreated with the same name but a different UID must not
+
+    validate an old ReplicaSet's ownership claim.
+    """
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    # The currently-live Deployment "web" has a fresh UID...
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web-v2")]
+    )
+    # ...but this ReplicaSet was created under the old, now-deleted "web" (uid v1).
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web-v1",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_overlapping_deployment_names_are_disambiguated_by_owner_reference() -> None:
+    """8. Deployment "web" and "web-api" must not be confused by name-prefix matching."""
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [
+            make_deployment("web", namespace="default", uid="deploy-web"),
+            make_deployment("web-api", namespace="default", uid="deploy-web-api"),
+        ]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
             ),
             make_replicaset(
                 "web-api-222",
                 namespace="default",
                 uid="rs-web-api",
                 deployment_owner_name="web-api",
+                deployment_owner_uid="deploy-web-api",
             ),
         ]
     )
@@ -270,6 +422,7 @@ def test_overlapping_deployment_names_are_disambiguated_by_owner_reference() -> 
 
 
 def test_standalone_replicaset_is_not_attributed_to_a_deployment() -> None:
+    """9. A ReplicaSet with no Deployment owner reference at all (standalone)."""
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
@@ -332,13 +485,22 @@ def test_pod_owned_by_non_replicaset_controller_is_not_attributed() -> None:
 
 
 def test_ownership_matching_is_namespace_safe() -> None:
-    """The same ReplicaSet name in two namespaces must not cross-attribute."""
+    """10. The same ReplicaSet/Deployment names in two namespaces must not cross-attribute."""
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="team-a", uid="deploy-a")]
+    )
     apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
         [
-            make_replicaset("web-111", namespace="team-a", uid="rs-a", deployment_owner_name="web"),
+            make_replicaset(
+                "web-111",
+                namespace="team-a",
+                uid="rs-a",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-a",
+            ),
             make_replicaset("web-111", namespace="team-b", uid="rs-b", deployment_owner_name=None),
         ]
     )
@@ -355,10 +517,17 @@ def test_ownership_matching_uses_uid_and_does_not_fall_back_to_name_on_mismatch(
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
     apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
         [
             make_replicaset(
-                "web-111", namespace="default", uid="rs-current", deployment_owner_name="web"
+                "web-111",
+                namespace="default",
+                uid="rs-current",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
             )
         ]
     )
@@ -375,13 +544,21 @@ def test_ownership_matching_uses_uid_and_does_not_fall_back_to_name_on_mismatch(
 
 
 def test_ownership_matching_falls_back_to_name_when_uid_unavailable() -> None:
+    """6. Owner UID is unavailable; exact namespace-and-name fallback succeeds."""
     core_v1 = MagicMock()
     apps_v1 = empty_apps_v1()
     core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
     apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
         [
             make_replicaset(
-                "web-111", namespace="default", uid="rs-current", deployment_owner_name="web"
+                "web-111",
+                namespace="default",
+                uid="rs-current",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
             )
         ]
     )
@@ -395,6 +572,38 @@ def test_ownership_matching_falls_back_to_name_when_uid_unavailable() -> None:
     snapshot = make_collector(core_v1, apps_v1).collect()
 
     assert snapshot.pods[0].owning_deployment == "web"
+
+
+def test_pod_owner_uid_unavailable_and_name_does_not_match() -> None:
+    """7. Owner UID is unavailable, but the name doesn't match any collected ReplicaSet."""
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-current",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [
+            make_pod(
+                "web-111-xyz", namespace="default", owner_name="totally-different-rs", owner_uid=""
+            )
+        ]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
 
 
 # --- Transport / error handling ----------------------------------------------
@@ -499,11 +708,73 @@ def test_missing_kubeconfig_file_raises_collector_error(monkeypatch) -> None:
     from kubernetes import config as kube_config
 
     def fake_load(*args, **kwargs):
-        raise FileNotFoundError("no such file")
+        raise FileNotFoundError("no such file: /home/user/.kube/config")
 
     monkeypatch.setattr(kube_config, "load_kube_config", fake_load)
 
-    with pytest.raises(CollectorError, match="Kubeconfig file not found"):
+    with pytest.raises(CollectorError, match="could not read the kubeconfig"):
+        create_api_clients("any-context")
+
+
+def test_kubeconfig_permission_error_raises_collector_error(monkeypatch) -> None:
+    """An appropriate OSError subtype beyond FileNotFoundError (e.g. unreadable file)."""
+    from kubernetes import config as kube_config
+
+    def fake_load(*args, **kwargs):
+        raise PermissionError("permission denied: /home/user/.kube/config")
+
+    monkeypatch.setattr(kube_config, "load_kube_config", fake_load)
+
+    with pytest.raises(CollectorError, match="could not read the kubeconfig"):
+        create_api_clients("any-context")
+
+
+def test_auth_plugin_subprocess_failure_raises_collector_error(monkeypatch) -> None:
+    """An exec-based credential plugin failing to run (subprocess.SubprocessError)."""
+    import subprocess
+
+    from kubernetes import config as kube_config
+
+    def fake_load(*args, **kwargs):
+        raise subprocess.SubprocessError(
+            "aws eks get-token failed: AccessDenied for arn:aws:iam::123456789012:user/x"
+        )
+
+    monkeypatch.setattr(kube_config, "load_kube_config", fake_load)
+
+    with pytest.raises(CollectorError) as excinfo:
+        create_api_clients("eks-context")
+
+    assert "authentication plugin" in str(excinfo.value)
+    assert "AccessDenied" not in str(excinfo.value)
+    assert "arn:aws:iam" not in str(excinfo.value)
+
+
+def test_tls_initialization_failure_raises_collector_error(monkeypatch) -> None:
+    from kubernetes import config as kube_config
+
+    def fake_load(*args, **kwargs):
+        raise ssl.SSLError("certificate verify failed: self-signed certificate")
+
+    monkeypatch.setattr(kube_config, "load_kube_config", fake_load)
+
+    with pytest.raises(CollectorError, match="TLS/certificate initialization"):
+        create_api_clients("any-context")
+
+
+def test_unexpected_error_during_config_load_is_not_masked(monkeypatch) -> None:
+    """Programming errors (e.g. AttributeError) must keep propagating, not be
+
+    hidden behind a generic CollectorError.
+    """
+    from kubernetes import config as kube_config
+
+    def fake_load(*args, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'get'")
+
+    monkeypatch.setattr(kube_config, "load_kube_config", fake_load)
+
+    with pytest.raises(AttributeError):
         create_api_clients("any-context")
 
 

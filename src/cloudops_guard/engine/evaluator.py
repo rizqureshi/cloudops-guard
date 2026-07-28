@@ -5,6 +5,12 @@ reporting the same missing-resources or mutable-tag finding once per
 replica. Pods without a matching, collected Deployment (e.g. bare pods) are
 evaluated directly so nothing running is skipped. Restart counts are
 runtime data and are always evaluated per pod.
+
+As defense in depth, a pod's `owning_deployment` name is not trusted on its
+own here: it is re-verified against the Deployments actually present in this
+snapshot before its own container checks are skipped. This means a
+collector-level attribution bug (or a future refactor that weakens it)
+cannot silently cause a running pod to go unchecked.
 """
 
 from __future__ import annotations
@@ -46,6 +52,9 @@ def evaluate(
 ) -> AuditReport:
     now = dt.datetime.now(dt.UTC)
     findings: list[Finding] = []
+    deployment_keys = {
+        (deployment.namespace, deployment.name) for deployment in snapshot.deployments
+    }
 
     for deployment in snapshot.deployments:
         for container in deployment.containers:
@@ -61,7 +70,11 @@ def evaluate(
             )
 
     for pod in snapshot.pods:
-        if pod.owning_deployment is None:
+        is_verified_deployment_owned = (
+            pod.owning_deployment is not None
+            and (pod.namespace, pod.owning_deployment) in deployment_keys
+        )
+        if not is_verified_deployment_owned:
             for container in pod.containers:
                 findings.extend(
                     evaluate_container(

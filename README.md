@@ -49,7 +49,7 @@ This repo commits a [`uv.lock`](uv.lock) so installs are reproducible across mac
 and CI. Install [uv](https://docs.astral.sh/uv/) once, then:
 
 ```bash
-uv sync --locked   # installs exactly what's in uv.lock, including dev dependencies
+uv sync --locked --extra dev   # installs exactly what's in uv.lock, including dev dependencies
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .

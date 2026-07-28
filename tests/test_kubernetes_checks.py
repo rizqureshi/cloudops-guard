@@ -263,6 +263,12 @@ def test_evaluate_empty_snapshot_yields_no_findings() -> None:
 
 
 def test_evaluate_checks_deployment_containers_once_not_per_replica_pod() -> None:
+    """12. A verified Deployment-owned pod does not produce duplicate template findings.
+
+    The pods' owning_deployment="web" is verified against the DeploymentInfo
+    actually present in snapshot.deployments (same namespace+name) before
+    their own container checks are skipped.
+    """
     bad_container = container(resources=ResourceRequirements())
     deployment = DeploymentInfo(
         name="web", namespace="default", replicas=2, containers=[bad_container]
@@ -286,6 +292,55 @@ def test_evaluate_checks_deployment_containers_once_not_per_replica_pod() -> Non
     pod_findings = [f for f in report.findings if f.resource_kind == ResourceKind.POD]
     assert len(deployment_findings) == 4  # 4 resource checks (image tag is pinned), once
     assert pod_findings == []  # owned pods are not separately re-checked
+
+
+def test_evaluate_gives_container_checks_to_pod_with_unverified_owning_deployment() -> None:
+    """11. A pod claiming an owning_deployment that matches no collected Deployment
+
+    (stale attribution, deleted Deployment, or a bug upstream) must still
+    receive its own container-level checks rather than being silently
+    skipped -- this is the evaluator's defense-in-depth verification.
+    """
+    bad_container = container(resources=ResourceRequirements())
+    pod = PodInfo(
+        name="orphaned",
+        namespace="default",
+        containers=[bad_container],
+        owning_deployment="web",  # claims ownership, but no such Deployment is collected
+    )
+    snapshot = ClusterSnapshot(
+        context="ctx", collected_at=NOW, namespaces=[], pods=[pod], deployments=[]
+    )
+
+    report = evaluate(snapshot)
+
+    assert len(report.findings) == 4  # 4 resource checks (image tag is pinned)
+    assert all(f.resource_kind == ResourceKind.POD for f in report.findings)
+
+
+def test_evaluate_verifies_owning_deployment_within_the_pod_s_own_namespace() -> None:
+    """A pod's owning_deployment name must be verified in its own namespace,
+
+    not just matched against any Deployment with that name anywhere.
+    """
+    bad_container = container(resources=ResourceRequirements())
+    deployment = DeploymentInfo(
+        name="web", namespace="other-namespace", replicas=2, containers=[bad_container]
+    )
+    pod = PodInfo(
+        name="cross-namespace-pod",
+        namespace="default",
+        containers=[bad_container],
+        owning_deployment="web",
+    )
+    snapshot = ClusterSnapshot(
+        context="ctx", collected_at=NOW, namespaces=[], pods=[pod], deployments=[deployment]
+    )
+
+    report = evaluate(snapshot)
+
+    pod_findings = [f for f in report.findings if f.resource_kind == ResourceKind.POD]
+    assert len(pod_findings) == 4
 
 
 def test_evaluate_checks_bare_pod_without_owning_deployment() -> None:

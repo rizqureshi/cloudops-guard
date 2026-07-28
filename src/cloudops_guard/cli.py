@@ -64,7 +64,7 @@ def audit_kubernetes(
     restart_threshold: int | None = typer.Option(
         None,
         "--restart-threshold",
-        help="Pod restart count at or above which a finding is raised.",
+        help="Per-container restart count at or above which a finding is raised.",
     ),
 ) -> None:
     """Audit a Kubernetes cluster context and write report.json and report.html."""

@@ -69,6 +69,7 @@ class PodInfo(BaseModel):
 class DeploymentInfo(BaseModel):
     name: str
     namespace: str
+    uid: str | None = None
     replicas: int
     containers: list[ContainerInfo] = Field(default_factory=list)
 
