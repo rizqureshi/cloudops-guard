@@ -1,0 +1,9 @@
+# Sample CloudOps Guard configuration for `cloudops-guard audit kubernetes --config`.
+# All keys are optional. Command-line flags (--namespace, --restart-threshold) always
+# override the values set here.
+
+# Restrict the audit to a single namespace. Omit or set to null to audit all namespaces.
+namespace: default
+
+# Pod restart count at or above which the excessive-restarts finding is raised.
+restart_threshold: 5

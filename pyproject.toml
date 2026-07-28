@@ -1,0 +1,44 @@
+[project]
+name = "cloudops-guard"
+version = "0.1.0"
+description = "Read-only auditing for Kubernetes reliability, security and cost hygiene"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+    "kubernetes>=29.0.0",
+    "typer>=0.12.0",
+    "pydantic>=2.7.0",
+    "jinja2>=3.1.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.scripts]
+cloudops-guard = "cloudops_guard.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cloudops_guard"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer.Option(...)/typer.Argument(...) as parameter defaults is the documented Typer pattern.
+"src/cloudops_guard/cli.py" = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
