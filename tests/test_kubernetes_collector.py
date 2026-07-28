@@ -606,6 +606,203 @@ def test_pod_owner_uid_unavailable_and_name_does_not_match() -> None:
     assert snapshot.pods[0].owning_deployment is None
 
 
+# --- ReplicaSet -> Deployment link: UID-unavailable fallback -----------------
+#
+# These specifically make the *ReplicaSet's* Deployment-owner UID
+# unavailable (deployment_owner_uid="") while the Pod's own owner reference
+# to the ReplicaSet keeps a normal UID -- the other ownership link, already
+# covered above, is left untouched so each test isolates one link at a time.
+
+
+def test_replicaset_deployment_owner_uid_unavailable_falls_back_to_name() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="",  # the RS's claim to "web" carries no UID
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment == "web"
+
+
+def test_replicaset_deployment_owner_uid_unavailable_and_name_does_not_match() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="totally-different-deployment",
+                deployment_owner_uid="",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_replicaset_deployment_owner_uid_unavailable_name_matches_other_namespace_only() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    # A Deployment named "web" exists, but only in a different namespace.
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="other-namespace", uid="deploy-web-other")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+# --- API group verification on owner references ------------------------------
+
+
+def test_pod_replicaset_owner_reference_with_wrong_api_group_is_ignored() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [
+            make_pod(
+                "web-111-xyz",
+                namespace="default",
+                owner_kind="ReplicaSet",
+                owner_name="web-111",
+                owner_uid="rs-web",
+                owner_api_version="batch/v1",  # wrong group for a ReplicaSet owner
+            )
+        ]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_replicaset_deployment_owner_reference_with_wrong_api_group_is_ignored() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+                deployment_owner_api_version="batch/v1",  # wrong group for a Deployment owner
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [make_pod("web-111-xyz", namespace="default", owner_name="web-111", owner_uid="rs-web")]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment is None
+
+
+def test_explicit_apps_v1_owner_references_still_match_normally() -> None:
+    """Passing an explicit (not merely default-omitted) "apps/v1" apiVersion
+
+    on both links must continue to resolve ownership correctly.
+    """
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.return_value = ListResult([])
+    apps_v1.list_deployment_for_all_namespaces.return_value = ListResult(
+        [make_deployment("web", namespace="default", uid="deploy-web")]
+    )
+    apps_v1.list_replica_set_for_all_namespaces.return_value = ListResult(
+        [
+            make_replicaset(
+                "web-111",
+                namespace="default",
+                uid="rs-web",
+                deployment_owner_name="web",
+                deployment_owner_uid="deploy-web",
+                deployment_owner_api_version="apps/v1",
+            )
+        ]
+    )
+    core_v1.list_pod_for_all_namespaces.return_value = ListResult(
+        [
+            make_pod(
+                "web-111-xyz",
+                namespace="default",
+                owner_name="web-111",
+                owner_uid="rs-web",
+                owner_api_version="apps/v1",
+            )
+        ]
+    )
+
+    snapshot = make_collector(core_v1, apps_v1).collect()
+
+    assert snapshot.pods[0].owning_deployment == "web"
+
+
 # --- Transport / error handling ----------------------------------------------
 
 
@@ -776,6 +973,172 @@ def test_unexpected_error_during_config_load_is_not_masked(monkeypatch) -> None:
 
     with pytest.raises(AttributeError):
         create_api_clients("any-context")
+
+
+# --- API client / wrapper construction failures -------------------------------
+#
+# These patch the construction point itself (client.ApiClient / client.CoreV1Api
+# / client.AppsV1Api) with kubeconfig loading forced to succeed, so they are
+# unambiguously about the second, separately-protected try block rather than
+# kubeconfig loading (which is already covered above).
+
+
+def _succeed_kube_config_load(monkeypatch) -> None:
+    from kubernetes import config as kube_config
+
+    monkeypatch.setattr(kube_config, "load_kube_config", lambda *args, **kwargs: None)
+
+
+def test_api_client_construction_ssl_error_raises_collector_error(monkeypatch) -> None:
+    import cloudops_guard.collectors.kubernetes as collector_module
+
+    _succeed_kube_config_load(monkeypatch)
+
+    def raise_ssl_error(*args, **kwargs):
+        raise ssl.SSLError("certificate verify failed: /home/user/.kube/client.crt")
+
+    monkeypatch.setattr(collector_module.client, "ApiClient", raise_ssl_error)
+
+    with pytest.raises(CollectorError) as excinfo:
+        create_api_clients("any-context")
+
+    assert "/home/user/.kube/client.crt" not in str(excinfo.value)
+    assert "certificate verify failed" not in str(excinfo.value)
+
+
+def test_api_client_construction_os_error_raises_collector_error(monkeypatch) -> None:
+    import cloudops_guard.collectors.kubernetes as collector_module
+
+    _succeed_kube_config_load(monkeypatch)
+
+    def raise_os_error(*args, **kwargs):
+        raise OSError("Errno 13: Permission denied: '/home/user/.kube/client.key'")
+
+    monkeypatch.setattr(collector_module.client, "ApiClient", raise_os_error)
+
+    with pytest.raises(CollectorError) as excinfo:
+        create_api_clients("any-context")
+
+    assert "/home/user/.kube/client.key" not in str(excinfo.value)
+    assert "Permission denied" not in str(excinfo.value)
+
+
+def test_api_client_construction_urllib3_error_raises_collector_error(monkeypatch) -> None:
+    import cloudops_guard.collectors.kubernetes as collector_module
+
+    _succeed_kube_config_load(monkeypatch)
+
+    def raise_urllib3_error(*args, **kwargs):
+        raise urllib3.exceptions.HTTPError("pool initialization failed")
+
+    monkeypatch.setattr(collector_module.client, "ApiClient", raise_urllib3_error)
+
+    with pytest.raises(CollectorError, match="Unable to initialize the Kubernetes API client"):
+        create_api_clients("any-context")
+
+
+def test_api_client_construction_unexpected_error_is_not_masked(monkeypatch) -> None:
+    """An unexpected AttributeError during ApiClient() construction must keep
+
+    propagating rather than being reported as a sanitized CollectorError.
+    """
+    import cloudops_guard.collectors.kubernetes as collector_module
+
+    _succeed_kube_config_load(monkeypatch)
+
+    def raise_attribute_error(*args, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'ssl_ca_cert'")
+
+    monkeypatch.setattr(collector_module.client, "ApiClient", raise_attribute_error)
+
+    with pytest.raises(AttributeError):
+        create_api_clients("any-context")
+
+
+def test_core_v1_api_wrapper_construction_failure_raises_collector_error(monkeypatch) -> None:
+    """API wrapper construction (CoreV1Api/AppsV1Api), not just ApiClient itself,
+
+    is protected consistently.
+    """
+    import cloudops_guard.collectors.kubernetes as collector_module
+
+    _succeed_kube_config_load(monkeypatch)
+
+    def raise_os_error(*args, **kwargs):
+        raise OSError("socket error initializing HTTPS connection pool")
+
+    monkeypatch.setattr(collector_module.client, "CoreV1Api", raise_os_error)
+
+    with pytest.raises(CollectorError, match="Unable to initialize the Kubernetes API client"):
+        create_api_clients("any-context")
+
+
+# --- Sanitized ApiException handling (no reason/body/headers exposure) -------
+
+
+def test_api_error_message_retains_http_status() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.side_effect = ApiException(status=403, reason="Forbidden")
+
+    with pytest.raises(CollectorError, match=r"HTTP 403"):
+        make_collector(core_v1, apps_v1).collect()
+
+
+def test_api_error_message_excludes_reason_text() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.side_effect = ApiException(
+        status=403, reason="Forbidden: token=super-secret-token-value"
+    )
+
+    with pytest.raises(CollectorError) as excinfo:
+        make_collector(core_v1, apps_v1).collect()
+
+    assert "super-secret-token-value" not in str(excinfo.value)
+    assert "Forbidden" not in str(excinfo.value)
+
+
+def test_api_error_message_excludes_response_body_and_headers() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    exc = ApiException(status=403, reason="Forbidden")
+    exc.body = "denied for service account with token eyJhbGciOiJSUzI1NiIs...secret"
+    exc.headers = {"WWW-Authenticate": "Bearer error=invalid_token, secret=abc123"}
+    core_v1.list_namespace.side_effect = exc
+
+    with pytest.raises(CollectorError) as excinfo:
+        make_collector(core_v1, apps_v1).collect()
+
+    message = str(excinfo.value)
+    assert "eyJhbGciOiJSUzI1NiIs" not in message
+    assert "WWW-Authenticate" not in message
+    assert "invalid_token" not in message
+
+
+def test_api_error_without_status_uses_generic_message_not_none() -> None:
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.side_effect = ApiException(status=None, reason="unknown")
+
+    with pytest.raises(CollectorError) as excinfo:
+        make_collector(core_v1, apps_v1).collect()
+
+    message = str(excinfo.value)
+    assert "None" not in message
+
+
+def test_api_error_exit_code_behavior_unchanged() -> None:
+    """CollectorError is still raised (and only CollectorError) for ApiException,
+
+    preserving the CLI's existing exit-code-1 handling.
+    """
+    core_v1 = MagicMock()
+    apps_v1 = empty_apps_v1()
+    core_v1.list_namespace.side_effect = ApiException(status=500, reason="Internal Error")
+
+    with pytest.raises(CollectorError):
+        make_collector(core_v1, apps_v1).collect()
 
 
 # --- Secret / sensitive data exclusion ---------------------------------------

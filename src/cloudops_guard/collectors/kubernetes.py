@@ -69,9 +69,14 @@ def create_api_clients(context: str) -> tuple[CoreV1Api, AppsV1Api]:
     Raises CollectorError with a clear, credential-free message if the
     kubeconfig file is missing or unreadable, the context does not exist,
     an exec-based authentication plugin fails to run, TLS initialization
-    fails, or the config cannot otherwise be loaded. Exception text is
-    deliberately never interpolated into the message: it can carry
-    kubeconfig file paths, command output or other locally-sensitive detail.
+    fails, the config cannot otherwise be loaded, or API client/wrapper
+    construction itself fails. Exception text is deliberately never
+    interpolated into the message: it can carry kubeconfig file paths,
+    certificate paths, command output or other locally-sensitive detail.
+
+    Kubeconfig loading and API client construction are kept in separate
+    try blocks so each failure is reported against the phase that actually
+    caused it.
     """
     try:
         kube_config.load_kube_config(context=context)
@@ -101,8 +106,15 @@ def create_api_clients(context: str) -> tuple[CoreV1Api, AppsV1Api]:
             f"that any exec-based credential plugin is installed."
         ) from None
 
-    api_client = client.ApiClient()
-    return client.CoreV1Api(api_client), client.AppsV1Api(api_client)
+    try:
+        api_client = client.ApiClient()
+        return client.CoreV1Api(api_client), client.AppsV1Api(api_client)
+    except _TRANSPORT_EXCEPTIONS as exc:
+        raise CollectorError(
+            f"Unable to initialize the Kubernetes API client for context {context!r} "
+            f"({type(exc).__name__}). Check TLS/certificate configuration and network "
+            f"connectivity for this context."
+        ) from None
 
 
 def _call_api[T](operation: str, func: Callable[[], T]) -> T:
@@ -111,11 +123,19 @@ def _call_api[T](operation: str, func: Callable[[], T]) -> T:
     Only expected API and transport failures are translated. Programming
     errors (AttributeError, TypeError, etc.) are intentionally left to
     propagate so they are not misreported as network problems.
+
+    ApiException.reason (and the response body/headers) are deliberately
+    never included: that text comes from the API server or an intervening
+    proxy/webhook and is not trusted content, only the HTTP status code is.
     """
     try:
         return func()
     except ApiException as exc:
-        raise CollectorError(f"{operation} failed (HTTP {exc.status}: {exc.reason})") from None
+        if exc.status is not None:
+            raise CollectorError(f"{operation} failed (HTTP {exc.status}).") from None
+        raise CollectorError(
+            f"{operation} failed: the Kubernetes API request did not succeed."
+        ) from None
     except _TRANSPORT_EXCEPTIONS as exc:
         raise CollectorError(
             f"{operation} failed: could not reach the Kubernetes API server "
