@@ -11,6 +11,10 @@ dependencies = [
     "pydantic>=2.7.0",
     "jinja2>=3.1.0",
     "pyyaml>=6.0.0",
+    # Transitively required by `kubernetes` already; declared explicitly because
+    # the collector imports urllib3.exceptions directly to classify transport
+    # failures (connection/DNS/TLS) separately from Kubernetes API errors.
+    "urllib3>=2.0.0",
 ]
 
 [project.scripts]

@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import datetime as dt
 
-from cloudops_guard.models import ContainerInfo, Finding, PodInfo, ResourceKind, Severity
+from cloudops_guard.models import (
+    ContainerInfo,
+    ContainerRuntimeStatus,
+    Finding,
+    PodInfo,
+    ResourceKind,
+    Severity,
+)
 
 CHECK_NO_CPU_REQUEST = "K8S-RES-001"
 CHECK_NO_MEMORY_REQUEST = "K8S-RES-002"
@@ -182,11 +189,15 @@ def _check_mutable_image_tag(
         resource_name=resource_name,
         container_name=container.name,
         evidence=f"Container '{container.name}' uses image '{container.image}' (tag: {observed})",
-        impact="Mutable tags such as 'latest' or an unpinned tag mean the exact image "
+        impact="A mutable tag such as 'latest', or no tag at all, means the exact image "
         "content running today may differ from what runs after the next pod restart, "
-        "undermining reproducibility, rollback safety and supply-chain traceability.",
-        recommendation="Pin the image to an immutable tag or digest (e.g. app:1.4.2 or "
-        "app@sha256:...).",
+        "undermining reproducibility, rollback safety and supply-chain traceability. A "
+        "specific version tag (e.g. app:1.4.2) is a meaningful improvement over 'latest', "
+        "but a tag can still be overwritten and re-pushed in the registry — it is not "
+        "itself a guarantee of immutability.",
+        recommendation="Pin the image to a specific version tag at minimum. For a "
+        "content-addressed, truly immutable reference, pin to a digest instead or in "
+        "addition (e.g. app@sha256:...).",
         auto_remediable=False,
         audited_at=now,
     )
@@ -218,26 +229,44 @@ def evaluate_container(
     return findings
 
 
-def evaluate_pod_restarts(
-    pod: PodInfo, context: str, threshold: int, now: dt.datetime
+def evaluate_container_restarts(
+    pod: PodInfo,
+    status: ContainerRuntimeStatus,
+    context: str,
+    threshold: int,
+    now: dt.datetime,
 ) -> Finding | None:
-    """Flag pods whose observed restart count meets or exceeds the threshold."""
-    if pod.restart_count < threshold:
+    """Flag a single container whose restart count meets or exceeds the threshold.
+
+    Each container is evaluated independently: a pod is never flagged merely
+    because several containers' individually-small counts add up to the
+    threshold. The count is cumulative for the pod's current lifetime — this
+    does not compute a time-windowed restart rate.
+    """
+    if status.restart_count < threshold:
         return None
+    evidence = (
+        f"Container '{status.container_name}' in pod '{pod.name}' has restarted "
+        f"{status.restart_count} time(s) (cumulative for the pod's current lifetime), "
+        f"meeting or exceeding the configured threshold of {threshold}"
+    )
+    if status.waiting_reason:
+        evidence += f"; current waiting reason: {status.waiting_reason}"
+    if status.last_termination_reason:
+        evidence += f"; last termination reason: {status.last_termination_reason}"
     return Finding(
         check_id=CHECK_EXCESSIVE_RESTARTS,
-        title="Pod has an excessive restart count",
+        title="Container has an excessive restart count",
         severity=Severity.HIGH,
         cluster_context=context,
         namespace=pod.namespace,
         resource_kind=ResourceKind.POD,
         resource_name=pod.name,
-        container_name=None,
-        evidence=f"Pod '{pod.name}' has restarted {pod.restart_count} time(s), meeting or "
-        f"exceeding the configured threshold of {threshold}",
+        container_name=status.container_name,
+        evidence=evidence,
         impact="Frequent restarts typically indicate crash looping, failing health checks, "
         "or resource exhaustion, and reduce the reliability of the workload.",
-        recommendation="Inspect pod events and container state for the root cause "
+        recommendation="Inspect this container's events and state for the root cause "
         "(crash, OOMKill, failed probe) before increasing replica count or ignoring the "
         "symptom.",
         auto_remediable=False,

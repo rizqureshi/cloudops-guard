@@ -44,11 +44,25 @@ class ContainerInfo(BaseModel):
     resources: ResourceRequirements = Field(default_factory=ResourceRequirements)
 
 
+class ContainerRuntimeStatus(BaseModel):
+    """Per-container runtime state. Restart counts are cumulative for the pod's
+
+    current lifetime (Kubernetes does not expose a time-windowed rate), and no
+    log content, messages or command output are ever included here.
+    """
+
+    container_name: str
+    restart_count: int = 0
+    ready: bool = False
+    waiting_reason: str | None = None
+    last_termination_reason: str | None = None
+
+
 class PodInfo(BaseModel):
     name: str
     namespace: str
     containers: list[ContainerInfo] = Field(default_factory=list)
-    restart_count: int = 0
+    container_statuses: list[ContainerRuntimeStatus] = Field(default_factory=list)
     owning_deployment: str | None = None
 
 

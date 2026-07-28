@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from cloudops_guard.checks.kubernetes import evaluate_container, evaluate_pod_restarts
+from cloudops_guard.checks.kubernetes import evaluate_container, evaluate_container_restarts
 from cloudops_guard.config import DEFAULT_RESTART_THRESHOLD
 from cloudops_guard.models import (
     AuditReport,
@@ -73,9 +73,12 @@ def evaluate(
                         now,
                     )
                 )
-        restart_finding = evaluate_pod_restarts(pod, snapshot.context, restart_threshold, now)
-        if restart_finding is not None:
-            findings.append(restart_finding)
+        for status in pod.container_statuses:
+            restart_finding = evaluate_container_restarts(
+                pod, status, snapshot.context, restart_threshold, now
+            )
+            if restart_finding is not None:
+                findings.append(restart_finding)
 
     return AuditReport(
         cluster_context=snapshot.context,

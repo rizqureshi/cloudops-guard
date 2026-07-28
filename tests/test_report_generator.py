@@ -6,6 +6,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
+
 from cloudops_guard.models import AuditReport, AuditSummary, Finding, ResourceKind, Severity
 from cloudops_guard.reports.generator import generate_reports
 
@@ -130,3 +132,59 @@ def test_json_report_handles_empty_findings(tmp_path: Path) -> None:
     raw = json.loads(json_path.read_text())
     assert raw["findings"] == []
     assert raw["summary"] == {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+
+def test_reports_handle_unicode_content(tmp_path: Path) -> None:
+    finding = make_finding(resource_name="wébapp-中文-\U0001f680")
+    json_path, html_path = generate_reports(make_report([finding]), tmp_path)
+
+    raw = json.loads(json_path.read_text(encoding="utf-8"))
+    assert raw["findings"][0]["resource_name"] == "wébapp-中文-\U0001f680"
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "wébapp-中文-\U0001f680" in html
+
+
+def test_generate_reports_replaces_existing_files(tmp_path: Path) -> None:
+    generate_reports(make_report([make_finding(check_id="K8S-RES-001")]), tmp_path)
+    first_json = (tmp_path / "report.json").read_text()
+
+    generate_reports(make_report([make_finding(check_id="K8S-IMG-001")]), tmp_path)
+    second_json = (tmp_path / "report.json").read_text()
+
+    assert first_json != second_json
+    assert "K8S-IMG-001" in second_json
+    assert "K8S-RES-001" not in second_json
+
+
+def test_write_failure_does_not_leave_a_truncated_report(tmp_path: Path, monkeypatch) -> None:
+    generate_reports(make_report([make_finding(check_id="K8S-RES-001")]), tmp_path)
+    original_json = (tmp_path / "report.json").read_text()
+    original_html = (tmp_path / "report.html").read_text()
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr("cloudops_guard.reports.generator.os.replace", boom)
+
+    with pytest.raises(OSError):
+        generate_reports(make_report([make_finding(check_id="K8S-IMG-001")]), tmp_path)
+
+    # Final files are untouched -- never partially overwritten.
+    assert (tmp_path / "report.json").read_text() == original_json
+    assert (tmp_path / "report.html").read_text() == original_html
+    # No leftover temp files from the failed write attempt.
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith(".report")]
+    assert leftovers == []
+
+
+def test_report_template_is_packaged() -> None:
+    """The HTML template must be resolvable through the installed package,
+
+    not just present in the source tree (a build misconfiguration could
+    otherwise drop it from an installed wheel silently).
+    """
+    from importlib.resources import files
+
+    template_path = files("cloudops_guard.reports") / "templates" / "report.html.j2"
+    assert template_path.is_file()

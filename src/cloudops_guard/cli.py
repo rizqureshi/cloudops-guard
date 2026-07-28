@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 
 from cloudops_guard.checks.kubernetes import (
     CHECK_EXCESSIVE_RESTARTS,
@@ -69,29 +70,32 @@ def audit_kubernetes(
     """Audit a Kubernetes cluster context and write report.json and report.html."""
     try:
         file_config = load_config(config_path)
+        effective_config = file_config.with_overrides(
+            namespace=namespace, restart_threshold=restart_threshold
+        )
+    except ValidationError as exc:
+        typer.secho(
+            f"Invalid configuration: {_format_validation_error(exc)}", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1) from None
     except (FileNotFoundError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from None
-
-    effective_namespace = namespace or file_config.namespace
-    effective_restart_threshold = (
-        restart_threshold if restart_threshold is not None else file_config.restart_threshold
-    )
 
     logger.info("Auditing Kubernetes context %r", context)
 
     try:
         core_v1, apps_v1 = create_api_clients(context)
         collector = KubernetesCollector(core_v1, apps_v1, context)
-        snapshot = collector.collect(namespace=effective_namespace)
+        snapshot = collector.collect(namespace=effective_config.namespace)
     except CollectorError as exc:
         typer.secho(f"Collection failed: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from None
 
     report = evaluate(
         snapshot,
-        restart_threshold=effective_restart_threshold,
-        namespace_filter=effective_namespace,
+        restart_threshold=effective_config.restart_threshold,
+        namespace_filter=effective_config.namespace,
     )
 
     try:
@@ -101,6 +105,14 @@ def audit_kubernetes(
         raise typer.Exit(code=1) from None
 
     _print_summary(report, json_path, html_path)
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    parts = []
+    for error in exc.errors():
+        loc = ".".join(str(p) for p in error["loc"]) or "config"
+        parts.append(f"{loc}: {error['msg']}")
+    return "; ".join(parts)
 
 
 def _print_summary(report: AuditReport, json_path: Path, html_path: Path) -> None:

@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from kubernetes.client import (
     V1Container,
+    V1ContainerState,
+    V1ContainerStateRunning,
+    V1ContainerStateTerminated,
+    V1ContainerStateWaiting,
     V1ContainerStatus,
     V1Deployment,
     V1DeploymentSpec,
@@ -20,8 +24,13 @@ from kubernetes.client import (
     V1PodSpec,
     V1PodStatus,
     V1PodTemplateSpec,
+    V1ReplicaSet,
+    V1ReplicaSetSpec,
     V1ResourceRequirements,
 )
+
+DEFAULT_REPLICASET_UID = "00000000-0000-0000-0000-0000000000rs"
+DEFAULT_DEPLOYMENT_UID = "00000000-0000-0000-0000-0000000000dp"
 
 
 def make_namespace(name: str) -> V1Namespace:
@@ -54,37 +63,65 @@ def make_container(
     )
 
 
+def make_container_status(
+    name: str = "app",
+    restart_count: int = 0,
+    ready: bool = True,
+    waiting_reason: str | None = None,
+    last_termination_reason: str | None = None,
+) -> V1ContainerStatus:
+    state = V1ContainerState(
+        waiting=V1ContainerStateWaiting(reason=waiting_reason) if waiting_reason else None,
+        running=None if waiting_reason else V1ContainerStateRunning(),
+    )
+    last_state = V1ContainerState(
+        terminated=(
+            V1ContainerStateTerminated(reason=last_termination_reason, exit_code=1)
+            if last_termination_reason
+            else None
+        )
+    )
+    return V1ContainerStatus(
+        name=name,
+        restart_count=restart_count,
+        ready=ready,
+        image="example.com/app:1.0.0",
+        image_id="",
+        state=state,
+        last_state=last_state,
+        started=True,
+    )
+
+
 def make_pod(
     name: str,
     namespace: str = "default",
     containers: list[V1Container] | None = None,
-    restart_counts: list[int] | None = None,
-    owner_replicaset_name: str | None = None,
+    container_statuses: list[V1ContainerStatus] | None = None,
+    owner_kind: str = "ReplicaSet",
+    owner_name: str | None = None,
+    owner_uid: str = DEFAULT_REPLICASET_UID,
 ) -> V1Pod:
+    """Build a pod. Pass owner_name to attach a single owner reference.
+
+    owner_uid="" simulates an owner reference without a UID (rare in
+    practice since the real API always sets it, but the collector must fall
+    back to name-based matching in that case). The client model rejects
+    uid=None outright since UID is a required OwnerReference field, so an
+    empty string is the correct way to simulate "unavailable" here. Leave
+    container_statuses=None to simulate a pod with no reported status yet.
+    """
     containers = containers or [make_container()]
     owner_references = None
-    if owner_replicaset_name:
+    if owner_name:
         owner_references = [
             V1OwnerReference(
-                api_version="apps/v1",
-                kind="ReplicaSet",
-                name=owner_replicaset_name,
-                uid="00000000-0000-0000-0000-000000000000",
+                api_version="apps/v1" if owner_kind in {"ReplicaSet", "Deployment"} else "batch/v1",
+                kind=owner_kind,
+                name=owner_name,
+                uid=owner_uid,
                 controller=True,
             )
-        ]
-    container_statuses = None
-    if restart_counts is not None:
-        container_statuses = [
-            V1ContainerStatus(
-                name=c.name,
-                restart_count=count,
-                image=c.image,
-                image_id="",
-                ready=True,
-                started=True,
-            )
-            for c, count in zip(containers, restart_counts, strict=True)
         ]
     return V1Pod(
         metadata=V1ObjectMeta(name=name, namespace=namespace, owner_references=owner_references),
@@ -106,6 +143,39 @@ def make_deployment(
             replicas=replicas,
             selector=V1LabelSelector(match_labels={"app": name}),
             template=V1PodTemplateSpec(spec=V1PodSpec(containers=containers)),
+        ),
+    )
+
+
+def make_replicaset(
+    name: str,
+    namespace: str = "default",
+    uid: str | None = DEFAULT_REPLICASET_UID,
+    deployment_owner_name: str | None = None,
+    deployment_owner_uid: str = DEFAULT_DEPLOYMENT_UID,
+) -> V1ReplicaSet:
+    """Build a ReplicaSet. Pass deployment_owner_name to make it Deployment-owned;
+
+    leave it None to represent a standalone ReplicaSet.
+    """
+    owner_references = None
+    if deployment_owner_name:
+        owner_references = [
+            V1OwnerReference(
+                api_version="apps/v1",
+                kind="Deployment",
+                name=deployment_owner_name,
+                uid=deployment_owner_uid,
+                controller=True,
+            )
+        ]
+    return V1ReplicaSet(
+        metadata=V1ObjectMeta(
+            name=name, namespace=namespace, uid=uid, owner_references=owner_references
+        ),
+        spec=V1ReplicaSetSpec(
+            selector=V1LabelSelector(match_labels={"app": name}),
+            template=V1PodTemplateSpec(spec=V1PodSpec(containers=[make_container()])),
         ),
     )
 

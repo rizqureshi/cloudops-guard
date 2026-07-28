@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cloudops-guard-auditor
+  namespace: my-namespace # replace with the namespace to audit
+subjects:
+  - kind: ServiceAccount
+    name: cloudops-guard-auditor
+    namespace: my-namespace # replace with the namespace to audit
+roleRef:
+  kind: Role
+  name: cloudops-guard-auditor
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,17 @@
+# Minimal read-only permissions for a cluster-wide `cloudops-guard audit kubernetes`
+# run (no --namespace). Grants only the "list" verb on the resource kinds the
+# collector actually calls (list_namespace, list_pod_for_all_namespaces,
+# list_deployment_for_all_namespaces, list_replica_set_for_all_namespaces).
+# No get/watch/create/update/patch/delete on any resource, and no access to
+# Secrets or ConfigMaps.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloudops-guard-auditor
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["list"]
