@@ -162,10 +162,11 @@ kubectl client: v1.36.3
 Kubernetes node: v1.36.1
 ```
 
-`report.json` and `report.html` were both generated for every audit run below. Only
-the JSON reports were parsed and their findings compared programmatically (see the
-comparison command in step 10 of the procedure); `report.html` rendering was **not**
-visually inspected as part of this test.
+`report.json` and `report.html` were both generated for every **successful** audit run
+below. The deliberately denied cluster-wide restricted audit (see below) failed during
+collection, as expected, and did not generate reports. Only JSON findings were parsed
+and compared programmatically (see the comparison command in step 10 of the
+procedure); `report.html` rendering was **not** visually inspected as part of this test.
 
 #### Fresh kind cluster audit
 
@@ -183,10 +184,10 @@ Total: 20
 These were all findings against kind's default system workloads (e.g. CoreDNS,
 kube-proxy) rather than anything created by this test. One note on interpreting this:
 kube-proxy runs as a DaemonSet, and DaemonSet collection/ownership resolution is not
-yet implemented (see [Non-goals](#non-goals-for-this-milestone)), so its pods are
-currently evaluated individually at the Pod level rather than deduplicated the way
-Deployment-managed pods are. This count is specific to the kind/Kubernetes node version
-above and the workloads kind happens to ship by default — it is not asserted to
+yet implemented, so its pods are currently evaluated individually at the Pod level
+rather than deduplicated the way Deployment-managed pods are. This count is specific
+to the kind/Kubernetes node version above and the workloads kind happens to ship by
+default — it is not asserted to
 reproduce exactly on other versions.
 
 #### Controlled namespace audit
@@ -303,9 +304,12 @@ kubectl --context kind-cloudops-guard -n guard-demo-ns \
 **4. Wait for all three to finish rolling out:**
 
 ```bash
-kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/good
-kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/under-resourced
-kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/latest-tag
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  rollout status deployment/good --timeout=120s
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  rollout status deployment/under-resourced --timeout=120s
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  rollout status deployment/latest-tag --timeout=120s
 ```
 
 **5. Audit the namespace using the administrator context:**
@@ -314,7 +318,7 @@ kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment
 uv run cloudops-guard audit kubernetes \
   --context kind-cloudops-guard \
   --namespace guard-demo-ns \
-  --output ./reports-admin-namespace
+  --output /tmp/cloudops-guard-admin-namespace
 ```
 
 **6. Apply the namespace-scoped RBAC example.** The checked-in manifests under
@@ -382,21 +386,29 @@ only — the real `~/.kube/config` is never touched):
 KUBECONFIG="$TEST_KUBECONFIG" uv run cloudops-guard audit kubernetes \
   --context guard-demo-restricted \
   --namespace guard-demo-ns \
-  --output ./reports-restricted-namespace
+  --output /tmp/cloudops-guard-restricted-namespace
 ```
 
 **10. Compare the administrator and restricted findings programmatically** (this reads
 the two `report.json` files; it never prints the token or the kubeconfig contents):
 
 ```bash
-python3 - ./reports-admin-namespace/report.json ./reports-restricted-namespace/report.json <<'PY'
+python3 - /tmp/cloudops-guard-admin-namespace/report.json \
+  /tmp/cloudops-guard-restricted-namespace/report.json <<'PY'
 import json
 import sys
 
 
 def normalize(findings):
     return sorted(
-        (f["check_id"], f["resource_kind"], f["resource_name"], f.get("container_name"))
+        (
+            f["check_id"],
+            f["severity"],
+            f["namespace"],
+            f["resource_kind"],
+            f["resource_name"],
+            f.get("container_name"),
+        )
         for f in findings
     )
 
@@ -422,16 +434,20 @@ does not have):
 ```bash
 KUBECONFIG="$TEST_KUBECONFIG" uv run cloudops-guard audit kubernetes \
   --context guard-demo-restricted \
-  --output ./reports-restricted-cluster-wide
-echo "Exit code: $?"
+  --output /tmp/cloudops-guard-restricted-cluster-wide
+RESTRICTED_EXIT=$?
+echo "Exit code: $RESTRICTED_EXIT"
 ```
 
-**12. Clean up**, restoring your original umask and removing the temporary kubeconfig
-and the cluster:
+**12. Clean up**, removing the generated report directories and temporary kubeconfig,
+restoring your original umask, and deleting the cluster:
 
 ```bash
+rm -rf /tmp/cloudops-guard-admin-namespace
+rm -rf /tmp/cloudops-guard-restricted-namespace
+rm -rf /tmp/cloudops-guard-restricted-cluster-wide
 rm -f "$TEST_KUBECONFIG"
-unset TOKEN TEST_KUBECONFIG
+unset TOKEN TEST_KUBECONFIG SA RESTRICTED_EXIT
 umask "$ORIGINAL_UMASK"
 unset ORIGINAL_UMASK
 
