@@ -144,59 +144,299 @@ data rather than spec data.
 
 [`kind`](https://kind.sigs.k8s.io/) runs a disposable Kubernetes cluster in Docker, so
 you can exercise the CLI end-to-end without touching a real cluster. This procedure
-requires Docker, `kind` and `kubectl`; if any are unavailable, this is a manual
-procedure to run yourself rather than something CI performs automatically.
+requires Docker, `kind` and `kubectl`. It is a manual test: it is not currently run by
+CI, and the disposable cluster it creates is intended only for local testing.
 
-```bash
-# 1. Install kind and kubectl (macOS example) and create a cluster
-brew install kind kubectl
-kind create cluster --name guard-demo   # adds a "kind-guard-demo" kubeconfig context
+### Acceptance test status
 
-# 2. Deploy one compliant Deployment, one missing resources, and one on `latest`
-kubectl create namespace guard-demo-ns
-kubectl -n guard-demo-ns create deployment good \
-  --image=nginx:1.27.0
-kubectl -n guard-demo-ns set resources deployment/good \
-  --requests=cpu=100m,memory=64Mi --limits=cpu=200m,memory=128Mi
-kubectl -n guard-demo-ns create deployment under-resourced --image=nginx:1.27.0
-kubectl -n guard-demo-ns create deployment latest-tag --image=nginx:latest
+This procedure was successfully executed on **July 28, 2026**, using:
 
-# 3. Run a cluster-wide audit
-cloudops-guard audit kubernetes --context kind-guard-demo --output ./reports-cluster-wide
-
-# 4. Apply the namespace-scoped RBAC example and get a token for it
-kubectl apply -f examples/rbac/namespace-scoped/ -n guard-demo-ns \
-  --dry-run=client -o yaml | sed 's/my-namespace/guard-demo-ns/' | kubectl apply -f -
-TOKEN=$(kubectl create token cloudops-guard-auditor -n guard-demo-ns --duration=1h)
-
-# 5. Build a kubeconfig context for that restricted service account and audit with it
-kubectl config set-credentials guard-demo-sa --token="$TOKEN"
-kubectl config set-context guard-demo-restricted \
-  --cluster=kind-guard-demo --user=guard-demo-sa --namespace=guard-demo-ns
-cloudops-guard audit kubernetes --context guard-demo-restricted \
-  --namespace guard-demo-ns --output ./reports-namespace-scoped
-
-# 6. Confirm both runs produced JSON + HTML reports
-ls reports-cluster-wide reports-namespace-scoped
-
-# 7. Confirm the restricted account genuinely cannot modify anything
-kubectl auth can-i create pods --as=system:serviceaccount:guard-demo-ns:cloudops-guard-auditor -n guard-demo-ns   # expects "no"
-kubectl auth can-i delete deployments --as=system:serviceaccount:guard-demo-ns:cloudops-guard-auditor -n guard-demo-ns   # expects "no"
-
-# 8. Tear down
-kind delete cluster --name guard-demo
+```text
+Hardware: Apple M4, 24 GB RAM
+Architecture: ARM64
+Operating system: macOS Tahoe 26.5.2
+Docker Desktop: 4.84.0
+Docker Engine: 29.6.2
+kind: v0.32.0
+kubectl client: v1.36.3
+Kubernetes node: v1.36.1
 ```
 
-Expected results: the cluster-wide report should show `under-resourced` and
-`latest-tag` findings (missing CPU/memory requests+limits, and the mutable-tag
-finding, respectively) but not `good`; the namespace-scoped run should produce an
-equivalent report restricted to `guard-demo-ns` while succeeding without any
-cluster-wide `list namespaces` permission; and both `kubectl auth can-i` checks in
-step 7 must return `no`.
+`report.json` and `report.html` were both generated for every audit run below. Only
+the JSON reports were parsed and their findings compared programmatically (see the
+comparison command in step 10 of the procedure); `report.html` rendering was **not**
+visually inspected as part of this test.
 
-This procedure was **not run** as part of this milestone — Docker/`kind`/`kubectl`
-were not available in the development environment used. Treat it as a documented,
-reproducible manual test rather than a verified result until someone runs it.
+#### Fresh kind cluster audit
+
+A cluster-wide audit run against a newly created cluster, before any demo namespace or
+Deployments were added, found:
+
+```text
+Critical: 0
+High: 6
+Medium: 14
+Low: 0
+Total: 20
+```
+
+These were all findings against kind's default system workloads (e.g. CoreDNS,
+kube-proxy) rather than anything created by this test. One note on interpreting this:
+kube-proxy runs as a DaemonSet, and DaemonSet collection/ownership resolution is not
+yet implemented (see [Non-goals](#non-goals-for-this-milestone)), so its pods are
+currently evaluated individually at the Pod level rather than deduplicated the way
+Deployment-managed pods are. This count is specific to the kind/Kubernetes node version
+above and the workloads kind happens to ship by default — it is not asserted to
+reproduce exactly on other versions.
+
+#### Controlled namespace audit
+
+Three Deployments were created in `guard-demo-ns`:
+
+- `good`: pinned version tag with CPU/memory requests and limits set.
+- `under-resourced`: pinned version tag, no requests or limits.
+- `latest-tag`: `nginx:latest`, no requests or limits.
+
+Auditing that namespace (administrator context) found:
+
+```text
+Critical: 0
+High: 3
+Medium: 6
+Low: 0
+Total: 9
+```
+
+By check ID:
+
+```text
+K8S-IMG-001: 1
+K8S-RES-001: 2
+K8S-RES-002: 2
+K8S-RES-003: 2
+K8S-RES-004: 2
+```
+
+By resource:
+
+```text
+good: 0
+under-resourced: 4
+latest-tag: 5
+```
+
+#### Restricted service-account audit
+
+Using the namespace-scoped RBAC example (see [RBAC
+permissions](#rbac-permissions-least-privilege)), the `cloudops-guard-auditor` service
+account in `guard-demo-ns` was confirmed, via `kubectl auth can-i`, to:
+
+- Be able to list Pods, Deployments and ReplicaSets in `guard-demo-ns`.
+- Not be able to list namespaces, Secrets or ConfigMaps.
+- Not be able to create Pods or delete Deployments.
+
+Auditing `guard-demo-ns` with this restricted identity succeeded and produced findings
+identical to the administrator-context run above, compared programmatically from the
+two `report.json` files:
+
+```text
+Admin findings: 9
+Restricted findings: 9
+Findings identical: True
+```
+
+A deliberately attempted cluster-wide audit using the same restricted context (i.e.
+omitting `--namespace`, which requires `list` on namespaces cluster-wide) failed
+correctly rather than partially succeeding or crashing:
+
+```text
+Collection failed: List namespaces failed (HTTP 403).
+Exit code: 1
+```
+
+### Reproducing this test
+
+The steps below use a consistent cluster name and context throughout:
+
+```text
+kind cluster name:  cloudops-guard
+kubectl context:    kind-cloudops-guard
+test namespace:     guard-demo-ns
+restricted context: guard-demo-restricted
+```
+
+They use `uv run cloudops-guard` rather than assuming the CLI is installed globally —
+substitute a plain `cloudops-guard` invocation if you've installed it some other way.
+
+**1. Verify tool versions** (install via e.g. `brew install kind kubectl` first if needed):
+
+```bash
+docker --version
+kind version
+kubectl version --client
+```
+
+**2. Create the cluster:**
+
+```bash
+kind create cluster --name cloudops-guard   # adds kubeconfig context "kind-cloudops-guard"
+```
+
+**3. Create the namespace and three Deployments:**
+
+```bash
+kubectl --context kind-cloudops-guard create namespace guard-demo-ns
+
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  create deployment good --image=nginx:1.27.0
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  set resources deployment/good \
+  --requests=cpu=100m,memory=64Mi --limits=cpu=200m,memory=128Mi
+
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  create deployment under-resourced --image=nginx:1.27.0
+
+kubectl --context kind-cloudops-guard -n guard-demo-ns \
+  create deployment latest-tag --image=nginx:latest
+```
+
+**4. Wait for all three to finish rolling out:**
+
+```bash
+kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/good
+kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/under-resourced
+kubectl --context kind-cloudops-guard -n guard-demo-ns rollout status deployment/latest-tag
+```
+
+**5. Audit the namespace using the administrator context:**
+
+```bash
+uv run cloudops-guard audit kubernetes \
+  --context kind-cloudops-guard \
+  --namespace guard-demo-ns \
+  --output ./reports-admin-namespace
+```
+
+**6. Apply the namespace-scoped RBAC example.** The checked-in manifests under
+`examples/rbac/namespace-scoped/` hardcode `namespace: my-namespace`; passing `-n
+guard-demo-ns` to `kubectl apply` would **not** retarget that (an explicit
+`metadata.namespace` always wins), so substitute it in memory instead, without editing
+the checked-in files:
+
+```bash
+for manifest in examples/rbac/namespace-scoped/*.yaml; do
+  sed 's/my-namespace/guard-demo-ns/g' "$manifest" |
+    kubectl --context kind-cloudops-guard apply -f -
+done
+```
+
+**7. Check the permission boundary** the RBAC example is meant to enforce:
+
+```bash
+SA="system:serviceaccount:guard-demo-ns:cloudops-guard-auditor"
+
+kubectl --context kind-cloudops-guard auth can-i list pods --as="$SA" -n guard-demo-ns
+kubectl --context kind-cloudops-guard auth can-i list deployments --as="$SA" -n guard-demo-ns
+kubectl --context kind-cloudops-guard auth can-i list replicasets --as="$SA" -n guard-demo-ns
+# all three above should print "yes"
+
+kubectl --context kind-cloudops-guard auth can-i list namespaces --as="$SA"
+kubectl --context kind-cloudops-guard auth can-i list secrets --as="$SA" -n guard-demo-ns
+kubectl --context kind-cloudops-guard auth can-i list configmaps --as="$SA" -n guard-demo-ns
+kubectl --context kind-cloudops-guard auth can-i create pods --as="$SA" -n guard-demo-ns
+kubectl --context kind-cloudops-guard auth can-i delete deployments --as="$SA" -n guard-demo-ns
+# all five above should print "no"
+```
+
+**8. Build a temporary kubeconfig for the restricted identity.** Do not add this
+service account's token to your normal `~/.kube/config`. Tighten the umask first so the
+temporary file is created readable only by you:
+
+```bash
+TEST_KUBECONFIG="/tmp/cloudops-guard-restricted.kubeconfig"
+ORIGINAL_UMASK=$(umask)
+umask 077
+
+kubectl --context kind-cloudops-guard \
+  config view --raw --minify > "$TEST_KUBECONFIG"
+
+TOKEN=$(kubectl --context kind-cloudops-guard \
+  -n guard-demo-ns \
+  create token cloudops-guard-auditor \
+  --duration=1h)
+
+kubectl --kubeconfig "$TEST_KUBECONFIG" config set-credentials cloudops-guard-auditor \
+  --token="$TOKEN"
+unset TOKEN
+
+kubectl --kubeconfig "$TEST_KUBECONFIG" config set-context guard-demo-restricted \
+  --cluster=kind-cloudops-guard \
+  --user=cloudops-guard-auditor \
+  --namespace=guard-demo-ns
+```
+
+**9. Audit the namespace using the restricted context** (via the temporary kubeconfig
+only — the real `~/.kube/config` is never touched):
+
+```bash
+KUBECONFIG="$TEST_KUBECONFIG" uv run cloudops-guard audit kubernetes \
+  --context guard-demo-restricted \
+  --namespace guard-demo-ns \
+  --output ./reports-restricted-namespace
+```
+
+**10. Compare the administrator and restricted findings programmatically** (this reads
+the two `report.json` files; it never prints the token or the kubeconfig contents):
+
+```bash
+python3 - ./reports-admin-namespace/report.json ./reports-restricted-namespace/report.json <<'PY'
+import json
+import sys
+
+
+def normalize(findings):
+    return sorted(
+        (f["check_id"], f["resource_kind"], f["resource_name"], f.get("container_name"))
+        for f in findings
+    )
+
+
+with open(sys.argv[1]) as fh:
+    admin_report = json.load(fh)
+with open(sys.argv[2]) as fh:
+    restricted_report = json.load(fh)
+
+admin_findings = normalize(admin_report["findings"])
+restricted_findings = normalize(restricted_report["findings"])
+
+print(f"Admin findings: {len(admin_findings)}")
+print(f"Restricted findings: {len(restricted_findings)}")
+print(f"Findings identical: {admin_findings == restricted_findings}")
+PY
+```
+
+**11. Confirm a cluster-wide audit with the restricted context fails as expected**
+(omitting `--namespace` requires cluster-wide `list` on namespaces, which this identity
+does not have):
+
+```bash
+KUBECONFIG="$TEST_KUBECONFIG" uv run cloudops-guard audit kubernetes \
+  --context guard-demo-restricted \
+  --output ./reports-restricted-cluster-wide
+echo "Exit code: $?"
+```
+
+**12. Clean up**, restoring your original umask and removing the temporary kubeconfig
+and the cluster:
+
+```bash
+rm -f "$TEST_KUBECONFIG"
+unset TOKEN TEST_KUBECONFIG
+umask "$ORIGINAL_UMASK"
+unset ORIGINAL_UMASK
+
+kind delete cluster --name cloudops-guard
+```
 
 ## Selecting a Kubernetes context
 
@@ -259,9 +499,14 @@ CloudOps Guard is **read-only** by design:
 - It never reads **ConfigMap** contents.
 - It never collects container **environment variable values**.
 - It never collects **application logs**.
-- It never prints kubeconfig credentials, tokens or certificates. Errors from the
-  Kubernetes client are surfaced with status codes and reasons only, never raw
-  credential material.
+- It never prints kubeconfig credentials, tokens, certificate material or other
+  locally-sensitive detail — including in error messages. Collector errors retain only
+  safe context: which operation failed, and the HTTP status code when one is available.
+  The Kubernetes API server's raw error `reason`, response body and response headers
+  are deliberately never displayed, since that text is server- (or proxy-) supplied and
+  not trusted content. Expected failures (missing kubeconfig, unknown context, API
+  errors, network/TLS problems, an unusable RBAC grant, etc.) produce a concise
+  one-line CLI message and exit with a non-zero status — not a raw traceback.
 - The Kubernetes API client is injectable, so the test suite never needs a live
   cluster and never talks to a real API server.
 
