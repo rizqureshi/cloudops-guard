@@ -5,10 +5,14 @@ regardless of which milestone is currently in progress.
 
 ## Scope discipline
 
-- Work incrementally, one milestone at a time. The current milestone is the Kubernetes
-  audit MVP (see README.md). Do not start GitLab integration, AKS/EKS-specific code, a
-  database, SaaS multi-tenancy, authentication, a web dashboard, billing or LLM
-  integration until a milestone explicitly calls for it.
+- Work incrementally, one milestone at a time. v0.1.0, the Kubernetes audit MVP, is
+  released (see README.md). The current milestone is v0.2.0: a read-only,
+  single-project GitLab CI/CD Audit MVP — see
+  `docs/milestones/v0.2.0-gitlab-audit.md` for its objective, command interface,
+  checks, invariants and non-goals. As of this milestone's definition, no GitLab
+  implementation code exists yet. Do not start AKS/EKS-specific code, a database, SaaS
+  multi-tenancy, authentication, a web dashboard, billing or LLM integration until a
+  milestone explicitly calls for it.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
 - Explain important architectural changes before making them — don't silently restructure
@@ -23,6 +27,27 @@ regardless of which milestone is currently in progress.
 - Never collect container environment variable values or application logs.
 - Never print kubeconfig credentials, tokens or certificate material — including in
   exception messages.
+
+## GitLab read-only and privacy invariants (v0.2.0+)
+
+These apply once GitLab audit implementation begins; see
+`docs/milestones/v0.2.0-gitlab-audit.md` §D for full rationale.
+
+- Use read-only GitLab API operations only.
+- Never call project, group, or instance CI/CD variables endpoints.
+- Never collect or report job traces, logs, artifacts, credentials, or tokens.
+- Never persist raw or merged CI YAML in reports.
+- Never reproduce CI scripts or variable values in findings or error messages.
+- If CI configuration must be processed to evaluate a check, process it only in
+  memory and retain only the normalized, non-sensitive fields that check needs.
+- Never log authentication headers.
+- Sanitize remote API errors and untrusted response content before they reach a
+  report or the terminal.
+- A failure to access required information must not silently produce a partial clean
+  report — fail the audit rather than under-report.
+- The GitLab access token is read only from the `CLOUDOPS_GUARD_GITLAB_TOKEN`
+  environment variable; it must never be accepted as a CLI option or read from a
+  configuration file.
 
 ## Testing
 
