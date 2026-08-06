@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CloudOps Guard - Kubernetes Audit Report</title>
+<style>
+  :root {
+    --critical: #b91c1c;
+    --high: #c2410c;
+    --medium: #a16207;
+    --low: #1d4ed8;
+    --bg: #ffffff;
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --panel: #f9fafb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 2rem; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .summary {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 2rem;
+  }
+  .summary-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    min-width: 120px;
+    background: var(--panel);
+  }
+  .summary-card .count { font-size: 2rem; font-weight: 700; }
+  .summary-card .label { color: var(--muted); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+  .summary-card.critical .count { color: var(--critical); }
+  .summary-card.high .count { color: var(--high); }
+  .summary-card.medium .count { color: var(--medium); }
+  .summary-card.low .count { color: var(--low); }
+  .severity-section { margin-bottom: 2.5rem; }
+  .severity-heading {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .severity-heading.critical { background: var(--critical); }
+  .severity-heading.high { background: var(--high); }
+  .severity-heading.medium { background: var(--medium); }
+  .severity-heading.low { background: var(--low); }
+  .finding {
+    border: 1px solid var(--border);
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1rem;
+    background: var(--panel);
+  }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--medium); }
+  .finding.low { border-left-color: var(--low); }
+  .finding h3 { margin: 0 0 0.25rem; }
+  .finding .locator { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  .finding dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
+  .finding dt { color: var(--muted); font-size: 0.85rem; }
+  .finding dd { margin: 0; }
+  .check-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; color: var(--muted); }
+  .empty-state { color: var(--muted); padding: 1rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+  <h1>CloudOps Guard &mdash; Kubernetes Audit Report</h1>
+  <p class="subtitle">Read-only audit of cluster context <strong>prod-demo-cluster</strong> (namespace: <strong>payments</strong>)</p>
+  <p class="meta">Generated at 2026-01-15T09:30:00+00:00</p>
+
+  <div class="summary">
+    <div class="summary-card critical">
+      <div class="count">0</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="summary-card high">
+      <div class="count">3</div>
+      <div class="label">High</div>
+    </div>
+    <div class="summary-card medium">
+      <div class="count">1</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="summary-card low">
+      <div class="count">0</div>
+      <div class="label">Low</div>
+    </div>
+  </div>
+
+  
+    
+      
+      
+    
+      
+      
+      <section class="severity-section">
+        <span class="severity-heading high">high (3)</span>
+        
+        <article class="finding high">
+          <h3>Container has no memory limit</h3>
+          <div class="locator">
+            <span class="check-id">K8S-RES-004</span>
+            &middot; Deployment <strong>checkout-api</strong>
+            in namespace <strong>payments</strong>
+            &middot; container <strong>api</strong>
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Container &#39;api&#39; (image: example.com/checkout-api:2.3.1) does not set resources.limits.memory</dd>
+            <dt>Impact</dt>
+            <dd>Without a memory limit this container can consume unbounded memory.</dd>
+            <dt>Recommendation</dt>
+            <dd>Set resources.limits.memory to cap worst-case memory usage.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+        <article class="finding high">
+          <h3>Container image uses a mutable tag</h3>
+          <div class="locator">
+            <span class="check-id">K8S-IMG-001</span>
+            &middot; Pod <strong>wébapp-batch-7f9c2</strong>
+            in namespace <strong>payments</strong>
+            &middot; container <strong>worker</strong>
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Container &#39;worker&#39; uses image &#39;example.com/batch:latest&#39; (tag: latest)</dd>
+            <dt>Impact</dt>
+            <dd>A mutable tag such as &#39;latest&#39; undermines reproducibility and rollback safety.</dd>
+            <dt>Recommendation</dt>
+            <dd>Pin the image to a specific version tag at minimum.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+        <article class="finding high">
+          <h3>Container has an excessive restart count</h3>
+          <div class="locator">
+            <span class="check-id">K8S-REL-001</span>
+            &middot; Pod <strong>cache-5d8f1</strong>
+            in namespace <strong>payments</strong>
+            
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Container &#39;redis&#39; in pod &#39;cache-5d8f1&#39; has restarted 9 time(s) (cumulative for the pod&#39;s current lifetime), meeting or exceeding the configured threshold of 5</dd>
+            <dt>Impact</dt>
+            <dd>Frequent restarts typically indicate crash looping or resource exhaustion.</dd>
+            <dt>Recommendation</dt>
+            <dd>Inspect this container&#39;s events and state for the root cause.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+      </section>
+      
+    
+      
+      
+      <section class="severity-section">
+        <span class="severity-heading medium">medium (1)</span>
+        
+        <article class="finding medium">
+          <h3>Container has no CPU request</h3>
+          <div class="locator">
+            <span class="check-id">K8S-RES-001</span>
+            &middot; Deployment <strong>checkout-api</strong>
+            in namespace <strong>payments</strong>
+            &middot; container <strong>api</strong>
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Container &#39;api&#39; (image: example.com/checkout-api:2.3.1) does not set resources.requests.cpu</dd>
+            <dt>Impact</dt>
+            <dd>Without a CPU request the scheduler cannot reserve capacity for this container.</dd>
+            <dt>Recommendation</dt>
+            <dd>Set resources.requests.cpu based on observed usage.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+      </section>
+      
+    
+      
+      
+    
+  
+
+  <footer>
+    CloudOps Guard is a read-only auditing tool. It never modifies cluster resources and never
+    collects Secret contents, ConfigMap contents, environment variable values or application logs.
+  </footer>
+</body>
+</html>

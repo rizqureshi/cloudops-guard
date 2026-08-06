@@ -1,0 +1,73 @@
+{
+  "cluster_context": "prod-demo-cluster",
+  "namespace_filter": "payments",
+  "generated_at": "2026-01-15T09:30:00Z",
+  "findings": [
+    {
+      "check_id": "K8S-RES-001",
+      "title": "Container has no CPU request",
+      "severity": "medium",
+      "cluster_context": "prod-demo-cluster",
+      "namespace": "payments",
+      "resource_kind": "Deployment",
+      "resource_name": "checkout-api",
+      "container_name": "api",
+      "evidence": "Container 'api' (image: example.com/checkout-api:2.3.1) does not set resources.requests.cpu",
+      "impact": "Without a CPU request the scheduler cannot reserve capacity for this container.",
+      "recommendation": "Set resources.requests.cpu based on observed usage.",
+      "auto_remediable": false,
+      "audited_at": "2026-01-15T09:30:00Z"
+    },
+    {
+      "check_id": "K8S-RES-004",
+      "title": "Container has no memory limit",
+      "severity": "high",
+      "cluster_context": "prod-demo-cluster",
+      "namespace": "payments",
+      "resource_kind": "Deployment",
+      "resource_name": "checkout-api",
+      "container_name": "api",
+      "evidence": "Container 'api' (image: example.com/checkout-api:2.3.1) does not set resources.limits.memory",
+      "impact": "Without a memory limit this container can consume unbounded memory.",
+      "recommendation": "Set resources.limits.memory to cap worst-case memory usage.",
+      "auto_remediable": false,
+      "audited_at": "2026-01-15T09:30:00Z"
+    },
+    {
+      "check_id": "K8S-IMG-001",
+      "title": "Container image uses a mutable tag",
+      "severity": "high",
+      "cluster_context": "prod-demo-cluster",
+      "namespace": "payments",
+      "resource_kind": "Pod",
+      "resource_name": "wébapp-batch-7f9c2",
+      "container_name": "worker",
+      "evidence": "Container 'worker' uses image 'example.com/batch:latest' (tag: latest)",
+      "impact": "A mutable tag such as 'latest' undermines reproducibility and rollback safety.",
+      "recommendation": "Pin the image to a specific version tag at minimum.",
+      "auto_remediable": false,
+      "audited_at": "2026-01-15T09:30:00Z"
+    },
+    {
+      "check_id": "K8S-REL-001",
+      "title": "Container has an excessive restart count",
+      "severity": "high",
+      "cluster_context": "prod-demo-cluster",
+      "namespace": "payments",
+      "resource_kind": "Pod",
+      "resource_name": "cache-5d8f1",
+      "container_name": null,
+      "evidence": "Container 'redis' in pod 'cache-5d8f1' has restarted 9 time(s) (cumulative for the pod's current lifetime), meeting or exceeding the configured threshold of 5",
+      "impact": "Frequent restarts typically indicate crash looping or resource exhaustion.",
+      "recommendation": "Inspect this container's events and state for the root cause.",
+      "auto_remediable": false,
+      "audited_at": "2026-01-15T09:30:00Z"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "high": 3,
+    "medium": 1,
+    "low": 0
+  }
+}
