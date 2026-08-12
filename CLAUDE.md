@@ -9,10 +9,12 @@ regardless of which milestone is currently in progress.
   released (see README.md). The current milestone is v0.2.0: a read-only,
   single-project GitLab CI/CD Audit MVP — see
   `docs/milestones/v0.2.0-gitlab-audit.md` for its objective, command interface,
-  checks, invariants and non-goals. As of this milestone's definition, no GitLab
-  implementation code exists yet. Do not start AKS/EKS-specific code, a database, SaaS
-  multi-tenancy, authentication, a web dashboard, billing or LLM integration until a
-  milestone explicitly calls for it.
+  checks, invariants and non-goals. GitLab implementation is in progress: the HTTP
+  client foundation and a normalized instance/project/protected-branch collector
+  exist; checks, CLI integration, CI configuration inspection, and report generation
+  do not yet. Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
+  authentication, a web dashboard, billing or LLM integration until a milestone
+  explicitly calls for it.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
 - Explain important architectural changes before making them — don't silently restructure
@@ -48,6 +50,10 @@ These apply once GitLab audit implementation begins; see
 - The GitLab access token is read only from the `CLOUDOPS_GUARD_GITLAB_TOKEN`
   environment variable; it must never be accepted as a CLI option or read from a
   configuration file.
+- An approved read-only endpoint may return unrelated sensitive fields that GitLab
+  provides automatically. Such fields may exist only transiently during response
+  parsing and must be discarded immediately at the normalization boundary. They must
+  never be retained, logged, persisted, reported, cached, or included in errors.
 
 ## Testing
 

@@ -1,12 +1,13 @@
-"""Read-only GitLab HTTP client foundation (v0.2.0 Phase 2A).
+"""Read-only GitLab HTTP client and normalized project collector (v0.2.0 Phase 2A/2B).
 
-This module provides only the transport-level building blocks needed by a
-future GitLab collector: token retrieval, base-URL validation, project
-identifier canonicalization, and an injectable, GET-only HTTP client with
-sanitized error handling and safe pagination. It does not fetch any GitLab
-project data, does not know about protected branches, CI configuration, or
-any of the eleven planned GitLab checks, and is not wired into the CLI yet
--- see `docs/milestones/v0.2.0-gitlab-audit.md`.
+Phase 2A provides the transport-level building blocks: token retrieval,
+base-URL validation, project identifier canonicalization, and an
+injectable, GET-only HTTP client with sanitized error handling and safe
+pagination. Phase 2B (`GitLabCollector`) uses only that client to produce a
+normalized `GitLabProjectSnapshot` (instance metadata, allowlisted project
+settings, and protected-branch rules) for the non-CI-Lint checks. Neither
+phase implements any of the eleven planned GitLab checks, CI configuration
+inspection, or CLI wiring -- see `docs/milestones/v0.2.0-gitlab-audit.md`.
 
 Security posture (see CLAUDE.md's GitLab invariants):
 - GET requests only; there is no method parameter that could later be set to
@@ -20,10 +21,19 @@ Security posture (see CLAUDE.md's GitLab invariants):
 - Redirects and automatic retries are disabled; TLS verification is left at
   urllib3's secure-by-default behavior (verified certificates), with no
   option to disable it.
+- `GitLabCollector` issues only three GET operations: `/metadata`,
+  `/projects/:id`, and `/projects/:id/protected_branches` (paginated). The
+  `/projects/:id` response may include unrelated sensitive fields GitLab
+  provides automatically (e.g. `runners_token`) that cannot be filtered at
+  the API level -- see "Approved unavoidable-field exception: GET
+  /projects/:id" in the milestone doc. Only an explicit allowlist of
+  normalized fields is ever retained; the raw response is never stored,
+  logged, printed, cached, reported, returned, or included in an exception.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
@@ -34,6 +44,12 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsp
 
 import urllib3
 import urllib3.exceptions
+
+from cloudops_guard.models import (
+    GitLabProjectSettings,
+    GitLabProjectSnapshot,
+    GitLabProtectedBranchRule,
+)
 
 GITLAB_TOKEN_ENV_VAR = "CLOUDOPS_GUARD_GITLAB_TOKEN"
 
@@ -91,10 +107,17 @@ def load_gitlab_token(env: Mapping[str, str] | None = None) -> str:
 def normalize_gitlab_base_url(url: str) -> str:
     """Validate and normalize a user-supplied GitLab base URL.
 
-    Returns the normalized base URL with no trailing slash and no `/api/v4`
-    suffix (e.g. "https://example.com/gitlab"). Raises `GitLabClientError`
-    for anything not safe to use as a trusted API origin. Never performs DNS
-    resolution; this is syntactic validation only.
+    Returns the normalized *instance* base URL with no trailing slash and no
+    `/api/v4` suffix (e.g. "https://example.com/gitlab"), regardless of
+    whether `url` was given with or without that suffix -- both
+    "https://gitlab.com" and "https://gitlab.com/api/v4" normalize to
+    "https://gitlab.com", and both "https://example.com/gitlab" and
+    "https://example.com/gitlab/api/v4" normalize to
+    "https://example.com/gitlab". A similar-looking path such as
+    "/api/v40" is not mistaken for the suffix (exact trailing-segment
+    match only). Raises `GitLabClientError` for anything not safe to use as
+    a trusted API origin. Never performs DNS resolution; this is syntactic
+    validation only.
     """
     if not isinstance(url, str) or not url.strip():
         raise GitLabClientError("GitLab base URL must not be empty.")
@@ -135,19 +158,22 @@ def normalize_gitlab_base_url(url: str) -> str:
         )
 
     path = parsed.path.rstrip("/")
+    if path.endswith(_API_PATH_SUFFIX):
+        path = path[: -len(_API_PATH_SUFFIX)]
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def gitlab_api_base_url(url: str) -> str:
     """Return the validated, normalized REST API v4 base URL for `url`.
 
-    Appends `/api/v4` to the normalized base from `normalize_gitlab_base_url`
-    -- but only if it is not already present: this is idempotent, so passing
-    either "https://gitlab.example.com" or "https://gitlab.example.com/api/v4"
-    (with or without a trailing slash, which normalization strips) both
-    produce "https://gitlab.example.com/api/v4", never a duplicated suffix.
-    A similar-looking path such as "/api/v40" is not mistaken for the
-    suffix, since the check is an exact trailing-segment match.
+    Appends `/api/v4` to the normalized instance base from
+    `normalize_gitlab_base_url`, which always strips a pre-existing
+    `/api/v4` suffix from `url` first -- so passing either
+    "https://gitlab.example.com" or "https://gitlab.example.com/api/v4"
+    (with or without a trailing slash) both produce exactly
+    "https://gitlab.example.com/api/v4", never a duplicated suffix. The
+    `endswith` guard below is defense in depth in case `normalize_gitlab_base_url`
+    is ever changed to stop stripping the suffix itself.
     """
     normalized = normalize_gitlab_base_url(url)
     if normalized.endswith(_API_PATH_SUFFIX):
@@ -312,6 +338,7 @@ class GitLabClient:
         max_pages: int = DEFAULT_MAX_PAGES,
     ) -> None:
         _validate_max_pages(max_pages)
+        self._instance_base_url = normalize_gitlab_base_url(base_url)
         self._api_base_url = gitlab_api_base_url(base_url)
         self._token = _validate_client_token(token)
         self._transport: Transport = transport if transport is not None else urllib3.PoolManager()
@@ -322,6 +349,17 @@ class GitLabClient:
     def api_base_url(self) -> str:
         """The validated, normalized `.../api/v4` base this client requests against."""
         return self._api_base_url
+
+    @property
+    def instance_base_url(self) -> str:
+        """The validated, normalized GitLab instance base URL (no `/api/v4` suffix).
+
+        Suitable for recording on a normalized snapshot as the audited
+        instance's identity, e.g. "https://gitlab.example.com" or
+        "https://example.com/gitlab" for a self-managed path-prefixed
+        install -- never with a trailing slash or a duplicated `/api/v4`.
+        """
+        return self._instance_base_url
 
     def _headers(self) -> dict[str, str]:
         return {"PRIVATE-TOKEN": self._token, "Accept": "application/json"}
@@ -556,3 +594,314 @@ def _parse_next_link(link_header: str) -> str | None:
         if rel == "next":
             return url
     return None
+
+
+# --- Phase 2B: normalized instance/project/protected-branch collector -----------
+#
+# Uses only the injectable `GitLabClient` above -- no independent transport,
+# no second token. Issues exactly three GET operations (see module
+# docstring). Every function below reads only an explicit allowlist of
+# fields out of a raw response dict; the dict itself is never stored,
+# returned, logged, or included in an exception -- it goes out of scope as
+# soon as normalization returns or raises.
+
+_ALLOWED_VISIBILITY = frozenset({"private", "internal", "public"})
+_ALLOWED_OVERRIDE_ROLE = frozenset({"no_one_allowed", "owner", "maintainer", "developer"})
+_ALLOWED_AUTO_CANCEL = frozenset({"enabled", "disabled"})
+_ALLOWED_ROLE_LEVELS = frozenset({0, 30, 40, 60})
+_SCOPE_IDENTIFIER_KEYS = ("user_id", "group_id", "deploy_key_id", "member_role_id")
+
+_GITLAB_VERSION_RE = re.compile(r"^(\d+)\.(\d+)(?:\.\d+)?(?:-[A-Za-z0-9]+)?$")
+_MIN_SELF_MANAGED_VERSION = (18, 4)
+_GITLAB_COM_HOSTNAMES = frozenset({"gitlab.com"})
+
+
+def _is_gitlab_com(instance_base_url: str) -> bool:
+    """True if `instance_base_url` is GitLab.com itself (not a self-managed instance).
+
+    GitLab.com is treated as always current per the milestone's supported-
+    versions boundary; a self-managed instance is still subject to the
+    minimum-version check.
+    """
+    return urlsplit(instance_base_url).hostname in _GITLAB_COM_HOSTNAMES
+
+
+def _normalize_metadata(payload: object, *, is_gitlab_com: bool) -> tuple[str, bool]:
+    """Validate a `GET /metadata` response and return `(version, enterprise)`.
+
+    Requires a non-empty `version` string in a recognizable
+    `major.minor[.patch]` form, optionally with a GitLab suffix such as
+    "-ee", and a real `enterprise` boolean. On a self-managed instance
+    (i.e. not GitLab.com), rejects a version earlier than 18.4 with a
+    fixed, sanitized error -- the raw version value is never reproduced in
+    an exception. `revision`, KAS URLs, and any other metadata field are
+    read never and retained never.
+    """
+    if not isinstance(payload, dict):
+        raise GitLabClientError("GitLab metadata response was not a JSON object.")
+
+    version = payload.get("version")
+    if not isinstance(version, str) or not version:
+        raise GitLabClientError("GitLab metadata response is missing a valid 'version' string.")
+    match = _GITLAB_VERSION_RE.match(version)
+    if match is None:
+        raise GitLabClientError("GitLab metadata response has an unrecognized 'version' format.")
+
+    enterprise = payload.get("enterprise")
+    if not isinstance(enterprise, bool):
+        raise GitLabClientError("GitLab metadata response is missing a boolean 'enterprise' field.")
+
+    if not is_gitlab_com:
+        major, minor = int(match.group(1)), int(match.group(2))
+        if (major, minor) < _MIN_SELF_MANAGED_VERSION:
+            raise GitLabClientError(
+                "GitLab instance version is not supported for this audit "
+                "(self-managed GitLab 18.4 or later is required)."
+            )
+
+    return version, enterprise
+
+
+def _require_bool_field(payload: Mapping[str, Any], field: str) -> bool:
+    if field not in payload:
+        raise GitLabClientError(f"GitLab project response is missing required field '{field}'.")
+    value = payload[field]
+    if not isinstance(value, bool):
+        raise GitLabClientError(f"GitLab project field '{field}' must be a boolean.")
+    return value
+
+
+def _require_nonempty_str_field(payload: Mapping[str, Any], field: str) -> str:
+    if field not in payload:
+        raise GitLabClientError(f"GitLab project response is missing required field '{field}'.")
+    value = payload[field]
+    if not isinstance(value, str) or not value:
+        raise GitLabClientError(f"GitLab project field '{field}' must be a non-empty string.")
+    return value
+
+
+def _require_enum_field(payload: Mapping[str, Any], field: str, allowed: frozenset[str]) -> str:
+    value = _require_nonempty_str_field(payload, field)
+    if value not in allowed:
+        raise GitLabClientError(f"GitLab project field '{field}' has an unrecognized value.")
+    return value
+
+
+def _require_positive_int_field(payload: Mapping[str, Any], field: str) -> int:
+    if field not in payload:
+        raise GitLabClientError(f"GitLab project response is missing required field '{field}'.")
+    value = payload[field]
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise GitLabClientError(f"GitLab project field '{field}' must be a positive integer.")
+    return value
+
+
+def _require_optional_non_negative_int_field(payload: Mapping[str, Any], field: str) -> int | None:
+    if field not in payload:
+        raise GitLabClientError(f"GitLab project response is missing required field '{field}'.")
+    value = payload[field]
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GitLabClientError(
+            f"GitLab project field '{field}' must be a non-negative integer or null."
+        )
+    return value
+
+
+def _normalize_project_settings(payload: object) -> GitLabProjectSettings:
+    """Validate and normalize a `GET /projects/:id` response.
+
+    Reads only the explicit allowlist of fields `GitLabProjectSettings`
+    needs -- every other field GitLab returns, including sensitive ones
+    such as `runners_token`, `owner`, `import_url`, or repository clone
+    URLs, is never read from `payload` at all. `payload` itself is never
+    stored, returned, or included in an exception; it goes out of scope
+    when this function returns. Every required field must be present and
+    correctly typed (no silent coercion of `"false"`/`0`/`False`, and no
+    truthiness-based presence check), or this raises a fixed,
+    sanitized `GitLabClientError` -- never reproducing the offending raw
+    value. `ci_default_git_depth` is the sole field allowed to be `null`;
+    every other field must be present and non-null.
+    """
+    if not isinstance(payload, dict):
+        raise GitLabClientError("GitLab project response was not a JSON object.")
+
+    project_id = _require_positive_int_field(payload, "id")
+    project_path = _require_nonempty_str_field(payload, "path_with_namespace")
+    default_branch = _require_nonempty_str_field(payload, "default_branch")
+    visibility = _require_enum_field(payload, "visibility", _ALLOWED_VISIBILITY)
+    only_allow_merge_if_pipeline_succeeds = _require_bool_field(
+        payload, "only_allow_merge_if_pipeline_succeeds"
+    )
+    public_jobs = _require_bool_field(payload, "public_jobs")
+    ci_push_repository_for_job_token_allowed = _require_bool_field(
+        payload, "ci_push_repository_for_job_token_allowed"
+    )
+    ci_pipeline_variables_minimum_override_role = _require_enum_field(
+        payload, "ci_pipeline_variables_minimum_override_role", _ALLOWED_OVERRIDE_ROLE
+    )
+    auto_cancel_pending_pipelines = _require_enum_field(
+        payload, "auto_cancel_pending_pipelines", _ALLOWED_AUTO_CANCEL
+    )
+    ci_default_git_depth = _require_optional_non_negative_int_field(payload, "ci_default_git_depth")
+    build_timeout = _require_positive_int_field(payload, "build_timeout")
+
+    return GitLabProjectSettings(
+        project_id=project_id,
+        project_path=project_path,
+        default_branch=default_branch,
+        visibility=visibility,
+        only_allow_merge_if_pipeline_succeeds=only_allow_merge_if_pipeline_succeeds,
+        public_jobs=public_jobs,
+        ci_push_repository_for_job_token_allowed=ci_push_repository_for_job_token_allowed,
+        ci_pipeline_variables_minimum_override_role=ci_pipeline_variables_minimum_override_role,
+        auto_cancel_pending_pipelines=auto_cancel_pending_pipelines,
+        ci_default_git_depth=ci_default_git_depth,
+        build_timeout=build_timeout,
+    )
+
+
+def _normalize_protected_branch(payload: object) -> GitLabProtectedBranchRule:
+    """Validate and normalize one `GET /projects/:id/protected_branches` entry.
+
+    Requires a non-empty `name` and a boolean `allow_force_push`. `inherited`
+    is optional (tier-dependent): absent normalizes to `None`; if the key is
+    present at all, it must be a boolean. `push_access_levels` entries scoped
+    to a specific user, group, deploy key, or custom role (any of
+    `user_id`/`group_id`/`deploy_key_id`/`member_role_id` non-null) are
+    outside v0.2.0's role-based scope and are ignored -- their identifiers
+    and `access_level_description` are never read into any retained value.
+    A role-based entry's `access_level` must be exactly one of the four
+    documented levels (0, 30, 40, 60); retained levels are deduplicated and
+    sorted deterministically. Any other field on the entry is ignored.
+    """
+    if not isinstance(payload, dict):
+        raise GitLabClientError("GitLab protected branch entry was not a JSON object.")
+
+    name = payload.get("name")
+    if not isinstance(name, str) or not name:
+        raise GitLabClientError("GitLab protected branch entry is missing a non-empty 'name'.")
+
+    allow_force_push = payload.get("allow_force_push")
+    if not isinstance(allow_force_push, bool):
+        raise GitLabClientError(
+            "GitLab protected branch entry is missing a boolean 'allow_force_push'."
+        )
+
+    inherited: bool | None = None
+    if "inherited" in payload:
+        inherited_value = payload["inherited"]
+        if not isinstance(inherited_value, bool):
+            raise GitLabClientError(
+                "GitLab protected branch entry's 'inherited' field must be a boolean."
+            )
+        inherited = inherited_value
+
+    raw_levels = payload.get("push_access_levels")
+    if not isinstance(raw_levels, list):
+        raise GitLabClientError(
+            "GitLab protected branch entry is missing a 'push_access_levels' list."
+        )
+
+    role_levels: set[int] = set()
+    for entry in raw_levels:
+        if not isinstance(entry, dict):
+            raise GitLabClientError(
+                "GitLab protected branch entry has a malformed push_access_levels entry."
+            )
+        if any(entry.get(key) is not None for key in _SCOPE_IDENTIFIER_KEYS):
+            # Scoped to a specific user/group/deploy-key/custom-role -- outside
+            # v0.2.0's role-based evaluation. Ignored without retaining its
+            # identifiers or access_level_description.
+            continue
+        access_level = entry.get("access_level")
+        if isinstance(access_level, bool) or not isinstance(access_level, int):
+            raise GitLabClientError(
+                "GitLab protected branch entry has a malformed role-based access_level."
+            )
+        if access_level not in _ALLOWED_ROLE_LEVELS:
+            raise GitLabClientError(
+                "GitLab protected branch entry has an unrecognized role-based access_level."
+            )
+        role_levels.add(access_level)
+
+    return GitLabProtectedBranchRule(
+        name=name,
+        allow_force_push=allow_force_push,
+        inherited=inherited,
+        role_push_access_levels=sorted(role_levels),
+    )
+
+
+class GitLabCollector:
+    """Collects a normalized, read-only `GitLabProjectSnapshot` for one project.
+
+    Issues only three GET operations, all through the injected
+    `GitLabClient`: `GET /metadata`, `GET /projects/:id`, and every page of
+    `GET /projects/:id/protected_branches`. Never calls CI Lint, CI/CD
+    variables, runner-management, pipeline/job, log/trace/artifact,
+    repository-file, or member/user/group/token endpoints, and never issues
+    a non-GET request. Implements no check, CLI command, or report.
+    """
+
+    def __init__(self, client: GitLabClient) -> None:
+        self._client = client
+
+    def collect_project_snapshot(
+        self,
+        project: str | int,
+        *,
+        collected_at: dt.datetime | None = None,
+    ) -> GitLabProjectSnapshot:
+        """Collect and return the normalized snapshot for `project`.
+
+        `project` may be a numeric project ID, a raw full path (e.g.
+        "group/subgroup/project"), or an already percent-encoded full path
+        -- see `canonicalize_gitlab_project`. The protected-branches request
+        uses the numeric project ID GitLab itself returns from `GET
+        /projects/:id`, not the caller-supplied identifier. `collected_at`
+        is injectable for deterministic tests; it otherwise defaults to
+        `datetime.now(datetime.UTC)`.
+
+        No raw response is ever stored on `self` or attached to the
+        returned snapshot -- and each raw response (in particular the `GET
+        /projects/:id` dict, which can carry unrelated sensitive fields
+        such as `runners_token`; see "Approved unavoidable-field exception"
+        in the milestone doc) is deliberately never bound to a named local
+        variable either. Each `get_json_object`/`get_json_list` call is
+        nested directly inside its normalization call, so the decoded
+        response is reachable only for the duration of that single
+        normalization call and is eligible for garbage collection
+        immediately afterward -- in particular, the raw project response is
+        gone well before the protected-branches request begins.
+        """
+        when = collected_at if collected_at is not None else dt.datetime.now(dt.UTC)
+
+        is_gitlab_com = _is_gitlab_com(self._client.instance_base_url)
+        version, enterprise = _normalize_metadata(
+            self._client.get_json_object("Get GitLab metadata", "/metadata"),
+            is_gitlab_com=is_gitlab_com,
+        )
+
+        canonical_id = canonicalize_gitlab_project(project)
+        project_settings = _normalize_project_settings(
+            self._client.get_json_object("Get project", f"/projects/{canonical_id}")
+        )
+
+        protected_branches = [
+            _normalize_protected_branch(entry)
+            for entry in self._client.get_json_list(
+                "List protected branches",
+                f"/projects/{project_settings.project_id}/protected_branches",
+            )
+        ]
+
+        return GitLabProjectSnapshot(
+            gitlab_url=self._client.instance_base_url,
+            gitlab_version=version,
+            enterprise=enterprise,
+            collected_at=when,
+            project=project_settings,
+            protected_branches=protected_branches,
+        )

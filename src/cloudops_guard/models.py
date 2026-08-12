@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import datetime as dt
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, StrictBool, StrictInt, field_validator
 
 
 class Severity(StrEnum):
@@ -190,3 +190,109 @@ class GitLabAuditReport(BaseModel):
     generated_at: dt.datetime
     findings: list[GitLabFinding] = Field(default_factory=list)
     summary: AuditSummary = Field(default_factory=AuditSummary)
+
+
+# --- GitLab normalized collection models (v0.2.0 Phase 2B) -------------------
+#
+# Additive and platform-specific, like the Phase 1 models above. These hold
+# the normalized, read-only instance/project/protected-branch snapshot that
+# the checks in a later phase will evaluate. They are constructed only from
+# an explicit allowlist of fields extracted by the collector -- never from a
+# raw API response dict -- and never carry a catch-all/raw-response field, so
+# a sensitive field GitLab returns but this milestone does not need (for
+# example `runners_token` on the Projects API response) has nowhere to end
+# up. See `docs/milestones/v0.2.0-gitlab-audit.md`, "Approved unavoidable-
+# field exception: GET /projects/:id".
+
+
+class GitLabProjectSettings(BaseModel):
+    """Normalized, allowlisted project settings needed by the non-CI-Lint checks.
+
+    Every field is required (no default), including ones whose valid value
+    may be `False`, `0`, or an enum member that reads as "safe" -- so a
+    field GitLab silently omits (e.g. a lower-than-Owner token on a
+    restricted field) fails model construction instead of being mistaken
+    for that field's presence with a safe value. `ci_default_git_depth` is
+    the sole exception: it may legitimately be `null` on GitLab's side, so
+    `None` is an accepted value, but the field itself is still required --
+    a response missing the key entirely still fails.
+    """
+
+    project_id: StrictInt = Field(gt=0)
+    project_path: str = Field(min_length=1)
+    default_branch: str = Field(min_length=1)
+    visibility: Literal["private", "internal", "public"]
+    only_allow_merge_if_pipeline_succeeds: StrictBool
+    public_jobs: StrictBool
+    ci_push_repository_for_job_token_allowed: StrictBool
+    ci_pipeline_variables_minimum_override_role: Literal[
+        "no_one_allowed", "owner", "maintainer", "developer"
+    ]
+    auto_cancel_pending_pipelines: Literal["enabled", "disabled"]
+    ci_default_git_depth: StrictInt | None = Field(ge=0)
+    build_timeout: StrictInt = Field(gt=0)
+
+
+_ALLOWED_ROLE_ACCESS_LEVELS = frozenset({0, 30, 40, 60})
+
+
+def _validate_role_access_level(value: int) -> int:
+    if value not in _ALLOWED_ROLE_ACCESS_LEVELS:
+        raise ValueError("role_push_access_levels entries must be one of 0, 30, 40, or 60.")
+    return value
+
+
+# `Literal[0, 30, 40, 60]` alone is not strict enough: Python's `bool` is an
+# `int` subclass, and pydantic's Literal matching compares by equality, so
+# `False`/`True` pass through as `0`/`1` unless the underlying type is
+# itself strict. `StrictInt` closes that (and also rejects `float`/`str`,
+# e.g. `30.0` or `"30"`); the validator below then restricts the accepted
+# integers to the four documented role levels.
+_RoleAccessLevel = Annotated[StrictInt, AfterValidator(_validate_role_access_level)]
+
+
+class GitLabProtectedBranchRule(BaseModel):
+    """A single normalized protected-branch rule.
+
+    `role_push_access_levels` retains only the four documented role-based
+    access levels (0 = no one, 30 = Developer, 40 = Maintainer, 60 = Admin),
+    as actual Python `int` values -- never a `bool`, `float`, or numeric
+    string, even one that would compare equal (e.g. `False`, `30.0`, `"30"`).
+    The collector normalization that builds this list is responsible for
+    discarding any user/group/deploy-key/custom-role-scoped entry (and its
+    identifiers/description) before construction -- this model never has a
+    field to hold them in the first place.
+    """
+
+    name: str = Field(min_length=1)
+    allow_force_push: StrictBool
+    inherited: StrictBool | None = None
+    role_push_access_levels: list[_RoleAccessLevel] = Field(default_factory=list)
+
+
+class GitLabProjectSnapshot(BaseModel):
+    """Everything collected from a GitLab instance for a single project audit.
+
+    Deliberately has no raw-response or catch-all metadata field: only the
+    normalized `project` and `protected_branches` models below, plus
+    instance-identity fields. CI configuration (`GL-CI-001`) normalization
+    is a separate, later task and has no representation here yet.
+    """
+
+    gitlab_url: str = Field(min_length=1)
+    gitlab_version: str = Field(min_length=1)
+    enterprise: StrictBool
+    collected_at: dt.datetime
+    project: GitLabProjectSettings
+    protected_branches: list[GitLabProtectedBranchRule] = Field(default_factory=list)
+
+    @field_validator("collected_at")
+    @classmethod
+    def _collected_at_must_be_timezone_aware(cls, value: dt.datetime) -> dt.datetime:
+        # `tzinfo is not None` alone is insufficient: a custom `tzinfo`
+        # subclass can be attached yet still return `None` from
+        # `utcoffset()`, which Python's own datetime docs describe as
+        # behaving like a naive datetime for arithmetic/comparison purposes.
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("collected_at must be timezone-aware.")
+        return value

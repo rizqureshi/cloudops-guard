@@ -19,6 +19,9 @@ from cloudops_guard.models import (
     Finding,
     GitLabAuditReport,
     GitLabFinding,
+    GitLabProjectSettings,
+    GitLabProjectSnapshot,
+    GitLabProtectedBranchRule,
     GitLabResourceKind,
     ResourceKind,
     Severity,
@@ -266,3 +269,457 @@ def test_kubernetes_finding_and_gitlab_finding_are_distinct_types() -> None:
     assert Finding is not GitLabFinding
     assert not issubclass(GitLabFinding, Finding)
     assert not issubclass(Finding, GitLabFinding)
+
+
+# --- GitLab normalized collection models (v0.2.0 Phase 2B) -------------------
+#
+# These models hold the normalized instance/project/protected-branch
+# snapshot the collector produces; see `docs/milestones/v0.2.0-gitlab-
+# audit.md`. All values used here are synthetic and non-sensitive.
+
+
+def make_project_settings(**overrides: object) -> GitLabProjectSettings:
+    defaults: dict[str, object] = {
+        "project_id": 42,
+        "project_path": "group/subgroup/project",
+        "default_branch": "main",
+        "visibility": "private",
+        "only_allow_merge_if_pipeline_succeeds": False,
+        "public_jobs": False,
+        "ci_push_repository_for_job_token_allowed": False,
+        "ci_pipeline_variables_minimum_override_role": "maintainer",
+        "auto_cancel_pending_pipelines": "enabled",
+        "ci_default_git_depth": 50,
+        "build_timeout": 3600,
+    }
+    defaults.update(overrides)
+    return GitLabProjectSettings(**defaults)
+
+
+def make_protected_branch_rule(**overrides: object) -> GitLabProtectedBranchRule:
+    defaults: dict[str, object] = {
+        "name": "main",
+        "allow_force_push": False,
+        "role_push_access_levels": [40],
+    }
+    defaults.update(overrides)
+    return GitLabProtectedBranchRule(**defaults)
+
+
+def make_project_snapshot(**overrides: object) -> GitLabProjectSnapshot:
+    defaults: dict[str, object] = {
+        "gitlab_url": "https://gitlab.example.com",
+        "gitlab_version": "18.4.1-ee",
+        "enterprise": True,
+        "collected_at": NOW,
+        "project": make_project_settings(),
+        "protected_branches": [make_protected_branch_rule()],
+    }
+    defaults.update(overrides)
+    return GitLabProjectSnapshot(**defaults)
+
+
+# --- GitLabProjectSettings: valid construction --------------------------------
+
+
+def test_project_settings_constructs_with_all_required_fields() -> None:
+    settings = make_project_settings()
+    assert settings.project_id == 42
+    assert settings.project_path == "group/subgroup/project"
+    assert settings.default_branch == "main"
+    assert settings.visibility == "private"
+    assert settings.ci_default_git_depth == 50
+
+
+def test_project_settings_accepts_null_ci_default_git_depth() -> None:
+    settings = make_project_settings(ci_default_git_depth=None)
+    assert settings.ci_default_git_depth is None
+
+
+def test_project_settings_accepts_zero_ci_default_git_depth() -> None:
+    settings = make_project_settings(ci_default_git_depth=0)
+    assert settings.ci_default_git_depth == 0
+
+
+@pytest.mark.parametrize("visibility", ["private", "internal", "public"])
+def test_project_settings_accepts_every_documented_visibility(visibility: str) -> None:
+    assert make_project_settings(visibility=visibility).visibility == visibility
+
+
+@pytest.mark.parametrize("role", ["no_one_allowed", "owner", "maintainer", "developer"])
+def test_project_settings_accepts_every_documented_override_role(role: str) -> None:
+    settings = make_project_settings(ci_pipeline_variables_minimum_override_role=role)
+    assert settings.ci_pipeline_variables_minimum_override_role == role
+
+
+@pytest.mark.parametrize("value", ["enabled", "disabled"])
+def test_project_settings_accepts_every_documented_auto_cancel_value(value: str) -> None:
+    settings = make_project_settings(auto_cancel_pending_pipelines=value)
+    assert settings.auto_cancel_pending_pipelines == value
+
+
+# --- GitLabProjectSettings: required fields, no defaults ----------------------
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "project_id",
+        "project_path",
+        "default_branch",
+        "visibility",
+        "only_allow_merge_if_pipeline_succeeds",
+        "public_jobs",
+        "ci_push_repository_for_job_token_allowed",
+        "ci_pipeline_variables_minimum_override_role",
+        "auto_cancel_pending_pipelines",
+        "ci_default_git_depth",
+        "build_timeout",
+    ],
+)
+def test_project_settings_every_field_is_required(field: str) -> None:
+    data = make_project_settings().model_dump()
+    del data[field]
+    with pytest.raises(ValidationError):
+        GitLabProjectSettings(**data)
+
+
+# --- GitLabProjectSettings: no silent type coercion ----------------------------
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_project_settings_rejects_boolean_project_id(value: bool) -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(project_id=value)
+
+
+@pytest.mark.parametrize("bad_project_id", [0, -1, -100])
+def test_project_settings_rejects_non_positive_project_id(bad_project_id: int) -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(project_id=bad_project_id)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "only_allow_merge_if_pipeline_succeeds",
+        "public_jobs",
+        "ci_push_repository_for_job_token_allowed",
+    ],
+)
+@pytest.mark.parametrize("value", [0, 1, "false", "true", None])
+def test_project_settings_rejects_non_boolean_for_boolean_fields(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(**{field: value})
+
+
+def test_project_settings_rejects_boolean_ci_default_git_depth() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(ci_default_git_depth=True)
+
+
+def test_project_settings_rejects_negative_ci_default_git_depth() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(ci_default_git_depth=-1)
+
+
+def test_project_settings_rejects_boolean_build_timeout() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(build_timeout=True)
+
+
+@pytest.mark.parametrize("bad_build_timeout", [0, -1])
+def test_project_settings_rejects_non_positive_build_timeout(bad_build_timeout: int) -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(build_timeout=bad_build_timeout)
+
+
+def test_project_settings_rejects_unknown_visibility() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(visibility="unknown")
+
+
+def test_project_settings_rejects_unknown_override_role() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(ci_pipeline_variables_minimum_override_role="admin")
+
+
+def test_project_settings_rejects_boolean_auto_cancel_pending_pipelines() -> None:
+    # auto_cancel_pending_pipelines is documented as a string enum, not a
+    # boolean -- a boolean here must never be silently treated as equivalent.
+    with pytest.raises(ValidationError):
+        make_project_settings(auto_cancel_pending_pipelines=True)
+
+
+def test_project_settings_rejects_unknown_auto_cancel_value() -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(auto_cancel_pending_pipelines="maybe")
+
+
+@pytest.mark.parametrize("field", ["project_path", "default_branch"])
+def test_project_settings_rejects_empty_required_identifiers(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_project_settings(**{field: ""})
+
+
+# --- GitLabProjectSettings: field order ----------------------------------------
+
+
+def test_project_settings_field_order() -> None:
+    assert list(GitLabProjectSettings.model_fields) == [
+        "project_id",
+        "project_path",
+        "default_branch",
+        "visibility",
+        "only_allow_merge_if_pipeline_succeeds",
+        "public_jobs",
+        "ci_push_repository_for_job_token_allowed",
+        "ci_pipeline_variables_minimum_override_role",
+        "auto_cancel_pending_pipelines",
+        "ci_default_git_depth",
+        "build_timeout",
+    ]
+
+
+# --- GitLabProjectSettings: JSON round-trip ------------------------------------
+
+
+def test_project_settings_json_round_trip() -> None:
+    settings = make_project_settings()
+    raw = json.loads(settings.model_dump_json())
+    reloaded = GitLabProjectSettings.model_validate(raw)
+    assert reloaded == settings
+
+
+def test_project_settings_json_round_trip_with_null_git_depth() -> None:
+    settings = make_project_settings(ci_default_git_depth=None)
+    raw = json.loads(settings.model_dump_json())
+    assert raw["ci_default_git_depth"] is None
+    reloaded = GitLabProjectSettings.model_validate(raw)
+    assert reloaded == settings
+
+
+# --- GitLabProtectedBranchRule: valid construction -----------------------------
+
+
+def test_protected_branch_rule_constructs_with_required_fields() -> None:
+    rule = make_protected_branch_rule()
+    assert rule.name == "main"
+    assert rule.allow_force_push is False
+    assert rule.role_push_access_levels == [40]
+
+
+def test_protected_branch_rule_inherited_defaults_to_none() -> None:
+    rule = make_protected_branch_rule()
+    assert rule.inherited is None
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_protected_branch_rule_accepts_a_boolean_inherited(value: bool) -> None:
+    rule = make_protected_branch_rule(inherited=value)
+    assert rule.inherited is value
+
+
+def test_protected_branch_rule_rejects_non_boolean_inherited() -> None:
+    with pytest.raises(ValidationError):
+        make_protected_branch_rule(inherited="true")
+
+
+@pytest.mark.parametrize("level", [0, 30, 40, 60])
+def test_protected_branch_rule_accepts_every_documented_role_level(level: int) -> None:
+    rule = make_protected_branch_rule(role_push_access_levels=[level])
+    assert rule.role_push_access_levels == [level]
+
+
+@pytest.mark.parametrize("level", [1, 10, 20, 50, 70, 100])
+def test_protected_branch_rule_rejects_undocumented_role_levels(level: int) -> None:
+    with pytest.raises(ValidationError):
+        make_protected_branch_rule(role_push_access_levels=[level])
+
+
+# --- role_push_access_levels: strict integer typing, not just value equality --
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        False,  # bool is an int subclass; False == 0 must not slip through
+        True,  # True == 1 is not even a documented level, but must still be
+        # rejected as a bool, not silently compared as an int
+        0.0,  # float(0.0) == 0 must not slip through
+        30.0,  # float(30.0) == 30 must not slip through
+        "30",  # numeric string must not slip through
+        99,  # undocumented integer
+    ],
+)
+def test_protected_branch_rule_rejects_non_strict_role_levels(value: object) -> None:
+    with pytest.raises(ValidationError):
+        make_protected_branch_rule(role_push_access_levels=[value])
+
+
+def test_protected_branch_rule_role_push_access_levels_defaults_to_empty_list() -> None:
+    rule = GitLabProtectedBranchRule(name="main", allow_force_push=False)
+    assert rule.role_push_access_levels == []
+
+
+def test_protected_branch_rule_rejects_empty_name() -> None:
+    with pytest.raises(ValidationError):
+        make_protected_branch_rule(name="")
+
+
+def test_protected_branch_rule_rejects_non_boolean_allow_force_push() -> None:
+    with pytest.raises(ValidationError):
+        make_protected_branch_rule(allow_force_push="false")
+
+
+# --- GitLabProtectedBranchRule: field order and default_factory independence --
+
+
+def test_protected_branch_rule_field_order() -> None:
+    assert list(GitLabProtectedBranchRule.model_fields) == [
+        "name",
+        "allow_force_push",
+        "inherited",
+        "role_push_access_levels",
+    ]
+
+
+def test_protected_branch_rule_default_role_levels_are_independent_across_instances() -> None:
+    rule_a = GitLabProtectedBranchRule(name="a", allow_force_push=False)
+    rule_b = GitLabProtectedBranchRule(name="b", allow_force_push=False)
+    rule_a.role_push_access_levels.append(40)
+    assert rule_a.role_push_access_levels != rule_b.role_push_access_levels
+    assert rule_b.role_push_access_levels == []
+
+
+# --- GitLabProtectedBranchRule: JSON round-trip --------------------------------
+
+
+def test_protected_branch_rule_json_round_trip() -> None:
+    rule = make_protected_branch_rule(inherited=True, role_push_access_levels=[0, 40])
+    raw = json.loads(rule.model_dump_json())
+    reloaded = GitLabProtectedBranchRule.model_validate(raw)
+    assert reloaded == rule
+
+
+# --- GitLabProjectSnapshot: valid construction ---------------------------------
+
+
+def test_project_snapshot_constructs_with_required_fields() -> None:
+    snapshot = make_project_snapshot()
+    assert snapshot.gitlab_url == "https://gitlab.example.com"
+    assert snapshot.gitlab_version == "18.4.1-ee"
+    assert snapshot.enterprise is True
+    assert snapshot.collected_at == NOW
+    assert snapshot.project == make_project_settings()
+    assert snapshot.protected_branches == [make_protected_branch_rule()]
+
+
+def test_project_snapshot_protected_branches_defaults_to_empty_list() -> None:
+    snapshot = make_project_snapshot(protected_branches=[])
+    assert snapshot.protected_branches == []
+
+
+def test_project_snapshot_default_protected_branches_is_independent_across_instances() -> None:
+    snapshot_a = GitLabProjectSnapshot(
+        gitlab_url="https://gitlab.example.com",
+        gitlab_version="18.4",
+        enterprise=False,
+        collected_at=NOW,
+        project=make_project_settings(),
+    )
+    snapshot_b = GitLabProjectSnapshot(
+        gitlab_url="https://gitlab.example.com",
+        gitlab_version="18.4",
+        enterprise=False,
+        collected_at=NOW,
+        project=make_project_settings(),
+    )
+    snapshot_a.protected_branches.append(make_protected_branch_rule())
+    assert snapshot_a.protected_branches != snapshot_b.protected_branches
+    assert snapshot_b.protected_branches == []
+
+
+def test_project_snapshot_rejects_naive_datetime() -> None:
+    with pytest.raises(ValidationError):
+        make_project_snapshot(collected_at=dt.datetime(2026, 2, 1, 12, 0))
+
+
+class _BrokenTzInfo(dt.tzinfo):
+    """A `tzinfo` that is attached (so `.tzinfo is not None`) but whose
+    `utcoffset()` returns `None` -- Python's own datetime documentation
+    describes this as behaving like a naive datetime for arithmetic and
+    comparison, so it must be rejected exactly like a bare naive datetime.
+    """
+
+    def utcoffset(self, __dt: dt.datetime | None) -> dt.timedelta | None:
+        return None
+
+    def dst(self, __dt: dt.datetime | None) -> dt.timedelta | None:
+        return None
+
+    def tzname(self, __dt: dt.datetime | None) -> str | None:
+        return "broken"
+
+
+def test_project_snapshot_rejects_tzinfo_with_none_utcoffset() -> None:
+    broken = dt.datetime(2026, 2, 1, 12, 0, tzinfo=_BrokenTzInfo())
+    assert broken.tzinfo is not None  # tzinfo is attached...
+    assert broken.utcoffset() is None  # ...but behaves as naive
+    with pytest.raises(ValidationError):
+        make_project_snapshot(collected_at=broken)
+
+
+def test_project_snapshot_rejects_non_boolean_enterprise() -> None:
+    with pytest.raises(ValidationError):
+        make_project_snapshot(enterprise=1)
+
+
+@pytest.mark.parametrize("field", ["gitlab_url", "gitlab_version"])
+def test_project_snapshot_rejects_empty_required_identifiers(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_project_snapshot(**{field: ""})
+
+
+def test_project_snapshot_has_no_raw_response_or_catch_all_field() -> None:
+    assert set(GitLabProjectSnapshot.model_fields) == {
+        "gitlab_url",
+        "gitlab_version",
+        "enterprise",
+        "collected_at",
+        "project",
+        "protected_branches",
+    }
+
+
+# --- GitLabProjectSnapshot: field order -----------------------------------------
+
+
+def test_project_snapshot_field_order() -> None:
+    assert list(GitLabProjectSnapshot.model_fields) == [
+        "gitlab_url",
+        "gitlab_version",
+        "enterprise",
+        "collected_at",
+        "project",
+        "protected_branches",
+    ]
+
+
+# --- GitLabProjectSnapshot: JSON round-trip -------------------------------------
+
+
+def test_project_snapshot_json_round_trip() -> None:
+    snapshot = make_project_snapshot()
+    raw = json.loads(snapshot.model_dump_json())
+    reloaded = GitLabProjectSnapshot.model_validate(raw)
+    assert reloaded == snapshot
+
+
+# --- Isolation from Phase 1 GitLab report models and Kubernetes models --------
+
+
+def test_project_snapshot_is_distinct_from_gitlab_audit_report() -> None:
+    assert GitLabProjectSnapshot is not GitLabAuditReport
+    assert not issubclass(GitLabProjectSnapshot, GitLabAuditReport)
+    assert not issubclass(GitLabAuditReport, GitLabProjectSnapshot)

@@ -183,6 +183,26 @@ def test_normalize_gitlab_base_url_normalizes_trailing_slash() -> None:
 
 
 @pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://gitlab.com/api/v4", "https://gitlab.com"),
+        ("https://gitlab.com/api/v4/", "https://gitlab.com"),
+        ("https://example.com/gitlab/api/v4", "https://example.com/gitlab"),
+        ("https://example.com/gitlab/api/v4/", "https://example.com/gitlab"),
+    ],
+)
+def test_normalize_gitlab_base_url_strips_api_v4_suffix(url: str, expected: str) -> None:
+    assert normalize_gitlab_base_url(url) == expected
+
+
+def test_normalize_gitlab_base_url_does_not_mistake_similar_path_for_suffix() -> None:
+    # "/api/v40" must not be treated as an already-present "/api/v4" suffix.
+    assert normalize_gitlab_base_url("https://gitlab.example.com/api/v40") == (
+        "https://gitlab.example.com/api/v40"
+    )
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "",
@@ -413,6 +433,31 @@ def test_constructor_rejects_invalid_max_pages(value: object) -> None:
 def test_constructor_accepts_max_pages_boundary_value_1() -> None:
     client = GitLabClient("https://gitlab.example.com", SYNTHETIC_TOKEN, max_pages=1)
     assert client is not None
+
+
+# --- instance_base_url property --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://gitlab.com", "https://gitlab.com"),
+        ("https://gitlab.com/", "https://gitlab.com"),
+        ("https://gitlab.com/api/v4", "https://gitlab.com"),
+        ("https://example.com/gitlab", "https://example.com/gitlab"),
+        ("https://example.com/gitlab/api/v4", "https://example.com/gitlab"),
+    ],
+)
+def test_instance_base_url_is_normalized_without_api_v4_suffix(
+    base_url: str, expected: str
+) -> None:
+    client = GitLabClient(base_url, SYNTHETIC_TOKEN)
+    assert client.instance_base_url == expected
+
+
+def test_instance_base_url_and_api_base_url_are_consistent() -> None:
+    client = GitLabClient("https://example.com/gitlab/api/v4", SYNTHETIC_TOKEN)
+    assert client.api_base_url == f"{client.instance_base_url}/api/v4"
 
 
 # --- 5 & 6. HTTP client behavior and response handling --------------------------
