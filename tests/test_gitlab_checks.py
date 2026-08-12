@@ -1,7 +1,8 @@
-"""Tests for the deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B,
+"""Tests for the deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C,
 `cloudops_guard.checks.gitlab`): the protected-default-branch checks
-(`GL-BR-001` - `GL-BR-003`) and the project-setting checks (`GL-MR-001`,
-`GL-SEC-001` - `GL-SEC-003`, `GL-COST-001`).
+(`GL-BR-001` - `GL-BR-003`), the project-setting checks (`GL-MR-001`,
+`GL-SEC-001` - `GL-SEC-003`, `GL-COST-001`), and the job timeout check
+(`GL-REL-001`).
 
 Only synthetic `GitLabProjectSnapshot`/`GitLabProtectedBranchRule`/
 `GitLabProjectSettings` objects are used -- no `GitLabClient` or
@@ -24,9 +25,11 @@ from cloudops_guard.checks.gitlab import (
     CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED,
     CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
     CHECK_FORCE_PUSH_ALLOWED,
+    CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD,
     CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
     CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
     CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+    evaluate_job_timeout_check,
     evaluate_project_setting_checks,
     evaluate_protected_branch_checks,
 )
@@ -1203,3 +1206,301 @@ def test_protected_branch_checks_are_unaffected_by_project_setting_evaluation() 
         CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
         CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
     ]
+
+
+# --- GL-REL-001 (Phase 2C-C: job timeout check) ---------------------------------
+
+
+def test_timeout_above_threshold_produces_exactly_one_finding() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert finding.check_id == CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD
+
+
+def test_timeout_equal_to_threshold_produces_no_finding() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=1800)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is None
+
+
+def test_timeout_below_threshold_produces_no_finding() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=900)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is None
+
+
+def test_one_second_above_threshold_produces_a_finding() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=1801)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+
+
+def test_one_second_below_threshold_produces_no_finding() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=1799)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is None
+
+
+def test_gl_rel_001_finding_fields_are_correct() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert finding.check_id == "GL-REL-001"
+    assert finding.title == "Project job timeout exceeds a configurable threshold"
+    assert finding.severity == Severity.MEDIUM
+    assert finding.project_path == "group/subgroup/project"
+    assert finding.resource_kind == GitLabResourceKind.PROJECT
+    assert finding.resource_name == "group/subgroup/project"
+    assert finding.job_name is None
+    assert finding.auto_remediable is False
+    assert finding.audited_at == NOW
+
+
+def test_gl_rel_001_evidence_contains_exact_seconds_and_minute_equivalents() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert "3600 seconds" in finding.evidence
+    assert "1800 seconds" in finding.evidence
+    assert "60 minutes" in finding.evidence
+    assert "30 minutes" in finding.evidence
+
+
+# --- GL-REL-001 minute formatting (exact, integer-based divmod formatter) ------
+#
+# All exercised through the public `evaluate_job_timeout_check` entry point,
+# never the private formatter directly.
+
+
+@pytest.mark.parametrize(
+    ("seconds_value", "expected_text", "role"),
+    [
+        # role="threshold": seconds_value can't be placed on build_timeout's
+        # side and still trigger a finding when it's the smallest example (1
+        # second), since the threshold must be a smaller positive int -- so
+        # it's placed on the threshold side instead, with build_timeout one
+        # second larger.
+        (1, "0 minutes 1 second", "threshold"),
+        (59, "0 minutes 59 seconds", "build_timeout"),
+        (60, "1 minute", "build_timeout"),
+        (61, "1 minute 1 second", "build_timeout"),
+        (90, "1 minute 30 seconds", "build_timeout"),
+        (3600, "60 minutes", "build_timeout"),
+        (3601, "60 minutes 1 second", "build_timeout"),
+    ],
+)
+def test_gl_rel_001_evidence_formats_minutes_exactly(
+    seconds_value: int, expected_text: str, role: str
+) -> None:
+    if role == "threshold":
+        threshold = seconds_value
+        build_timeout = seconds_value + 1
+    else:
+        threshold = 1
+        build_timeout = seconds_value
+    snapshot = make_snapshot(rules=[], build_timeout=build_timeout)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=threshold
+    )
+    assert finding is not None
+    assert expected_text in finding.evidence
+
+
+def test_gl_rel_001_evidence_formats_exact_minutes_with_no_seconds_suffix() -> None:
+    # Exact-minute case: the seconds part must not appear at all (never
+    # "60 minutes 0 seconds").
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert "60 minutes" in finding.evidence
+    assert "60 minutes 0 seconds" not in finding.evidence
+    assert "30 minutes 0 seconds" not in finding.evidence
+
+
+def test_gl_rel_001_evidence_formats_non_exact_minutes_with_seconds_remainder() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=90)
+    finding = evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=61)
+    assert finding is not None
+    assert "1 minute 30 seconds" in finding.evidence
+    assert "1 minute 1 second" in finding.evidence
+
+
+def test_gl_rel_001_evidence_uses_correct_singular_and_plural_forms() -> None:
+    # threshold=1 -> "(0 minutes 1 second)": plural minutes, singular second
+    # build_timeout=61 -> "(1 minute 1 second)": singular minute, singular second
+    # Parenthesized substrings target the new formatter's output specifically,
+    # since the unrelated raw "N seconds" prefix elsewhere in the evidence
+    # (e.g. "61 seconds") would otherwise falsely contain "1 seconds".
+    snapshot = make_snapshot(rules=[], build_timeout=61)
+    finding = evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=1)
+    assert finding is not None
+    assert "(0 minutes 1 second)" in finding.evidence
+    assert "(1 minute 1 second)" in finding.evidence
+    assert "(1 minutes" not in finding.evidence  # never "1 minutes" (missing singular)
+
+
+def test_gl_rel_001_evidence_formats_values_below_one_minute() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=45)
+    finding = evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=1)
+    assert finding is not None
+    assert "0 minutes 45 seconds" in finding.evidence
+    assert "0 minutes 1 second" in finding.evidence
+
+
+def test_gl_rel_001_handles_a_very_large_threshold_without_overflow_or_float() -> None:
+    # Python ints are arbitrary precision; the formatter must use only
+    # integer divmod, never float conversion, so this must neither raise
+    # OverflowError nor lose precision/produce scientific notation.
+    huge_threshold = 10**30 + 7
+    snapshot = make_snapshot(rules=[], build_timeout=huge_threshold + 1)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=huge_threshold
+    )
+    assert finding is not None
+    # Exact seconds values for both sides, reproduced verbatim (no "e+" /
+    # scientific notation, no rounding).
+    assert str(huge_threshold) in finding.evidence
+    assert str(huge_threshold + 1) in finding.evidence
+    assert "e+" not in finding.evidence.lower()
+    minutes, seconds = divmod(huge_threshold, 60)
+    minutes_word = "minute" if minutes == 1 else "minutes"
+    seconds_word = "second" if seconds == 1 else "seconds"
+    assert f"{minutes} {minutes_word} {seconds} {seconds_word}" in finding.evidence
+
+
+def test_gl_rel_001_evidence_still_contains_exact_seconds_values_after_formatter_fix() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=90)
+    finding = evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=61)
+    assert finding is not None
+    assert "90 seconds" in finding.evidence
+    assert "61 seconds" in finding.evidence
+
+
+def test_gl_rel_001_impact_explains_the_risk_without_overclaiming() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    impact_lower = finding.impact.lower()
+    assert "hung job" in impact_lower
+    assert "runner slot" in impact_lower
+    assert "delaying feedback" in impact_lower
+    assert "compute cost" in impact_lower
+    # Must not claim actual observation of these events.
+    assert "was hung" not in impact_lower
+    assert "actually consumed" not in impact_lower
+    assert "historical" not in impact_lower
+    assert "history" not in impact_lower
+
+
+def test_gl_rel_001_recommendation_advises_lowering_and_notes_exception() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    recommendation_lower = finding.recommendation.lower()
+    assert "lower" in recommendation_lower
+    assert "job-level timeout" in recommendation_lower
+    assert "legitimately long-running" in recommendation_lower
+    assert "intentionally long" in recommendation_lower
+
+
+def test_gl_rel_001_uses_supplied_audited_at_exactly() -> None:
+    when = dt.datetime(2032, 7, 4, 12, 0, tzinfo=dt.UTC)
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=when, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert finding.audited_at == when
+
+
+def test_gl_rel_001_does_not_mutate_snapshot() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    original_project = snapshot.project.model_copy(deep=True)
+    evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800)
+    assert snapshot.project == original_project
+
+
+def test_gl_rel_001_repeated_evaluation_is_deterministic() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    first = evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800)
+    second = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert first == second
+
+
+@pytest.mark.parametrize("threshold", [1, 60, 1800, 3600, 86400])
+def test_gl_rel_001_accepts_valid_positive_integer_thresholds(threshold: int) -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=threshold + 1)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=threshold
+    )
+    assert finding is not None
+
+
+@pytest.mark.parametrize(
+    "bad_threshold",
+    [0, -1, -100, True, False, 1.5, "3600", "", None],
+)
+def test_gl_rel_001_rejects_invalid_thresholds(bad_threshold: object) -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    with pytest.raises(
+        ValueError, match="job_timeout_threshold_seconds must be a positive integer"
+    ):
+        evaluate_job_timeout_check(
+            snapshot, audited_at=NOW, job_timeout_threshold_seconds=bad_threshold
+        )  # type: ignore[arg-type]
+
+
+def test_gl_rel_001_invalid_threshold_fails_before_producing_a_finding() -> None:
+    # A very large build_timeout would otherwise obviously trigger a finding
+    # -- proving the invalid threshold is rejected regardless of what the
+    # comparison would have produced, i.e. validated before evaluation.
+    snapshot = make_snapshot(rules=[], build_timeout=999_999)
+    with pytest.raises(ValueError):
+        evaluate_job_timeout_check(snapshot, audited_at=NOW, job_timeout_threshold_seconds=0)
+
+
+def test_gl_rel_001_evidence_contains_no_job_specific_or_sensitive_data() -> None:
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    evidence_lower = finding.evidence.lower()
+    for forbidden in (
+        "job_name",
+        "job name",
+        "log",
+        "trace",
+        "artifact",
+        "variable",
+        "credential",
+        "token",
+        "runner",
+        "previously",
+        "historical",
+        "observed",
+    ):
+        assert forbidden not in evidence_lower

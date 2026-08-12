@@ -1,4 +1,4 @@
-"""Deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B).
+"""Deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C).
 
 Each check operates only on the normalized `GitLabProjectSnapshot` produced
 by the Phase 2B collector (`cloudops_guard.collectors.gitlab.GitLabCollector`)
@@ -12,9 +12,13 @@ Phase 2C-A implements the three protected-default-branch checks
 Phase 2C-B adds five project-setting checks (`GL-MR-001`, `GL-SEC-001` -
 `GL-SEC-003`, `GL-COST-001`, entry point `evaluate_project_setting_checks`) --
 kept as a separate entry point rather than folded into the protected-branch
-one, and there is no combined all-GitLab evaluator yet. CI Lint image
-inspection, evaluator/report integration, and CLI wiring remain separate,
-later work -- see `docs/milestones/v0.2.0-gitlab-audit.md`.
+one. Phase 2C-C adds `GL-REL-001` (entry point `evaluate_job_timeout_check`),
+also kept as its own separate entry point -- it requires a caller-supplied
+`job_timeout_threshold_seconds` with no product-level default yet, so it is
+not folded into `evaluate_project_setting_checks` either. There is still no
+combined all-GitLab evaluator. `GL-COST-002`, `GL-CI-001` image inspection,
+evaluator/report integration, and CLI wiring remain separate, later work --
+see `docs/milestones/v0.2.0-gitlab-audit.md`.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ CHECK_BROAD_PIPELINE_VISIBILITY = "GL-SEC-001"
 CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED = "GL-SEC-002"
 CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED = "GL-SEC-003"
 CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED = "GL-COST-001"
+CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD = "GL-REL-001"
 
 _DEVELOPER_ROLE_LEVEL = 30
 _DEVELOPER_OVERRIDE_ROLE = "developer"
@@ -233,9 +238,10 @@ def _build_project_setting_finding(
     recommendation: str,
     audited_at: dt.datetime,
 ) -> GitLabFinding:
-    """Shared field assembly for every Phase 2C-B project-setting finding.
+    """Shared field assembly for a project-level finding (Phase 2C-B and 2C-C).
 
-    All five checks in this section report the same resource identity: the
+    Every project-setting check (the five in this section, plus `GL-REL-001`
+    in the Phase 2C-C section below) reports the same resource identity: the
     project itself (not a specific branch/job), so `project_path`,
     `resource_kind`, `resource_name`, and `job_name` are identical across
     all of them.
@@ -436,3 +442,95 @@ def evaluate_project_setting_checks(
         if finding is not None:
             findings.append(finding)
     return findings
+
+
+# --- Phase 2C-C: job timeout check -----------------------------------------------
+
+_SECONDS_PER_MINUTE = 60
+
+
+def _validate_job_timeout_threshold(value: object) -> int:
+    """Validate a caller-supplied `job_timeout_threshold_seconds` value.
+
+    Must be a real, non-boolean `int` greater than zero. `bool` is rejected
+    even though Python treats it as an `int` subclass, matching the same
+    pattern used throughout `collectors/gitlab.py`. The rejected value is
+    never reproduced in the raised error.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("job_timeout_threshold_seconds must be a positive integer.")
+    return value
+
+
+def _format_seconds_as_minutes(total_seconds: int) -> str:
+    """Format `total_seconds` as an exact "N minute(s) [M second(s)]" string.
+
+    Uses integer `divmod` only -- no float division or decimal rounding --
+    so this is exact and never raises `OverflowError` for an arbitrarily
+    large positive Python `int` (Python integers are arbitrary precision;
+    it is float conversion that would risk overflow/precision loss for a
+    huge value). Minutes are always shown, even when zero (e.g. "0 minutes
+    1 second"); the seconds part is included only when the remainder is
+    non-zero. Singular/plural forms are applied independently to each part.
+    """
+    minutes, seconds = divmod(total_seconds, _SECONDS_PER_MINUTE)
+    minutes_text = f"{minutes} minute" + ("" if minutes == 1 else "s")
+    if seconds == 0:
+        return minutes_text
+    seconds_text = f"{seconds} second" + ("" if seconds == 1 else "s")
+    return f"{minutes_text} {seconds_text}"
+
+
+def evaluate_job_timeout_check(
+    snapshot: GitLabProjectSnapshot,
+    *,
+    audited_at: dt.datetime,
+    job_timeout_threshold_seconds: int,
+) -> GitLabFinding | None:
+    """Evaluate `GL-REL-001` (project job timeout exceeds a configurable threshold).
+
+    Operates only on `snapshot.project.build_timeout` -- never retrieves any
+    additional GitLab data (no pipelines, jobs, traces, logs, artifacts,
+    variables, or runner data), and never mutates `snapshot`. `audited_at`
+    is used exactly as supplied (never `datetime.now()`).
+
+    `job_timeout_threshold_seconds` is a required, caller-supplied operator
+    threshold -- no product-level default is introduced here; that is a
+    later integration-phase decision. It is validated before evaluation: a
+    fixed, sanitized `ValueError` is raised for anything that is not a real,
+    non-boolean, positive `int`, without reproducing the rejected value, and
+    before any finding could be produced.
+
+    A finding is produced only when the configured project timeout strictly
+    exceeds the threshold; a timeout equal to or below the threshold passes.
+
+    Kept as its own public entry point rather than folded into
+    `evaluate_project_setting_checks`, so existing callers/tests are not
+    forced to supply a threshold, and there is still no combined all-GitLab
+    evaluator.
+    """
+    threshold = _validate_job_timeout_threshold(job_timeout_threshold_seconds)
+
+    build_timeout = snapshot.project.build_timeout
+    if build_timeout <= threshold:
+        return None
+
+    return _build_project_setting_finding(
+        check_id=CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD,
+        title="Project job timeout exceeds a configurable threshold",
+        severity=Severity.MEDIUM,
+        snapshot=snapshot,
+        evidence=(
+            f"Configured project job timeout: {build_timeout} seconds "
+            f"({_format_seconds_as_minutes(build_timeout)}). Configured audit "
+            f"threshold: {threshold} seconds ({_format_seconds_as_minutes(threshold)})."
+        ),
+        impact="An excessively long job timeout lets a hung job occupy a runner "
+        "slot for longer, delaying feedback and potentially increasing compute "
+        "cost.",
+        recommendation="Lower the project's default job timeout to a value "
+        "appropriate for normal jobs, and use job-level timeout overrides only "
+        "for legitimately long-running work. Projects with intentionally long "
+        "builds may choose a higher threshold.",
+        audited_at=audited_at,
+    )
