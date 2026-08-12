@@ -1,13 +1,19 @@
-"""Deterministic GitLab checks (v0.2.0 Phase 2C-A: protected-default-branch checks).
+"""Deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B).
 
 Each check operates only on the normalized `GitLabProjectSnapshot` produced
 by the Phase 2B collector (`cloudops_guard.collectors.gitlab.GitLabCollector`)
 -- never on `GitLabClient`/`GitLabCollector` directly, and never on any raw
 GitLab API response. This module performs no HTTP, filesystem,
 environment-variable, or subprocess access, and never mutates the snapshot
-it is given. It implements only the three protected-default-branch checks
-(`GL-BR-001` - `GL-BR-003`); the remaining project-setting checks, CI Lint
-image inspection, evaluator/report integration, and CLI wiring are separate,
+it is given.
+
+Phase 2C-A implements the three protected-default-branch checks
+(`GL-BR-001` - `GL-BR-003`, entry point `evaluate_protected_branch_checks`).
+Phase 2C-B adds five project-setting checks (`GL-MR-001`, `GL-SEC-001` -
+`GL-SEC-003`, `GL-COST-001`, entry point `evaluate_project_setting_checks`) --
+kept as a separate entry point rather than folded into the protected-branch
+one, and there is no combined all-GitLab evaluator yet. CI Lint image
+inspection, evaluator/report integration, and CLI wiring remain separate,
 later work -- see `docs/milestones/v0.2.0-gitlab-audit.md`.
 """
 
@@ -27,8 +33,16 @@ from cloudops_guard.models import (
 CHECK_DEFAULT_BRANCH_NOT_PROTECTED = "GL-BR-001"
 CHECK_FORCE_PUSH_ALLOWED = "GL-BR-002"
 CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED = "GL-BR-003"
+CHECK_PIPELINE_SUCCESS_NOT_REQUIRED = "GL-MR-001"
+CHECK_BROAD_PIPELINE_VISIBILITY = "GL-SEC-001"
+CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED = "GL-SEC-002"
+CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED = "GL-SEC-003"
+CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED = "GL-COST-001"
 
 _DEVELOPER_ROLE_LEVEL = 30
+_DEVELOPER_OVERRIDE_ROLE = "developer"
+_NON_PUBLIC_VISIBILITIES = ("private", "internal")
+_AUTO_CANCEL_DISABLED = "disabled"
 
 _WILDCARD_TOKEN = "*"
 _ESCAPED_WILDCARD_TOKEN = re.escape(_WILDCARD_TOKEN)
@@ -202,4 +216,223 @@ def evaluate_protected_branch_checks(
     )
     if developer_push_finding is not None:
         findings.append(developer_push_finding)
+    return findings
+
+
+# --- Phase 2C-B: project-setting checks ------------------------------------------
+
+
+def _build_project_setting_finding(
+    *,
+    check_id: str,
+    title: str,
+    severity: Severity,
+    snapshot: GitLabProjectSnapshot,
+    evidence: str,
+    impact: str,
+    recommendation: str,
+    audited_at: dt.datetime,
+) -> GitLabFinding:
+    """Shared field assembly for every Phase 2C-B project-setting finding.
+
+    All five checks in this section report the same resource identity: the
+    project itself (not a specific branch/job), so `project_path`,
+    `resource_kind`, `resource_name`, and `job_name` are identical across
+    all of them.
+    """
+    project_path = snapshot.project.project_path
+    return GitLabFinding(
+        check_id=check_id,
+        title=title,
+        severity=severity,
+        project_path=project_path,
+        resource_kind=GitLabResourceKind.PROJECT,
+        resource_name=project_path,
+        job_name=None,
+        evidence=evidence,
+        impact=impact,
+        recommendation=recommendation,
+        auto_remediable=False,
+        audited_at=audited_at,
+    )
+
+
+def _check_pipeline_success_not_required(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    # Always evaluated -- the snapshot carries no CI-configuration-presence
+    # field, and this setting matters regardless of whether CI happens to
+    # be configured yet (see the milestone doc's GL-MR-001 note).
+    if snapshot.project.only_allow_merge_if_pipeline_succeeds:
+        return None
+    return _build_project_setting_finding(
+        check_id=CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
+        title="Successful pipelines are not required before merge",
+        severity=Severity.MEDIUM,
+        snapshot=snapshot,
+        evidence=(
+            "The 'Pipelines must succeed' setting "
+            "(only_allow_merge_if_pipeline_succeeds) is disabled."
+        ),
+        impact="Merge requests can be merged even when a pipeline fails, so any "
+        "configured tests, builds, or security scans cannot reliably gate merges "
+        "while this setting is disabled.",
+        recommendation="Enable 'Pipelines must succeed' in the project's merge request settings.",
+        audited_at=audited_at,
+    )
+
+
+def _check_public_jobs_on_non_public_project(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    # Per GitLab's documentation, "Public pipelines" never exposes a private
+    # or internal project's pipelines to unauthenticated outsiders -- but
+    # the audience it does expose them to differs by visibility, and is NOT
+    # uniformly "project members only":
+    # - "private": all project members, including Guests -- NOT
+    #   non-project members.
+    # - "internal": any authenticated, non-external instance user --
+    #   this DOES include non-project members, unlike "private".
+    # The evidence text below is intentionally visibility-specific rather
+    # than a blanket "public" claim or a blanket "members only" claim.
+    project = snapshot.project
+    if project.visibility not in _NON_PUBLIC_VISIBILITIES:
+        return None
+    if not project.public_jobs:
+        return None
+    if project.visibility == "private":
+        audience = "all project members, including Guests"
+    else:
+        audience = "authenticated non-external users, including non-project members"
+    return _build_project_setting_finding(
+        check_id=CHECK_BROAD_PIPELINE_VISIBILITY,
+        title="CI/CD pipeline details have broad visibility",
+        severity=Severity.HIGH,
+        snapshot=snapshot,
+        evidence=(
+            f"Project visibility: '{project.visibility}'. Public pipelines "
+            f"(public_jobs) is enabled, exposing pipeline details to {audience}."
+        ),
+        impact="Pipeline logs, artifacts, and pipeline security scan information may "
+        "be visible to a broader audience than intended for the project's visibility "
+        "level. Enabling broad access does not prove anyone has actually viewed that "
+        "information -- it describes what is possible, not what occurred. Broad "
+        "pipeline visibility may be an intentional choice for the project, so this is "
+        "a possible false positive rather than a certain defect. CloudOps Guard never "
+        "fetches pipelines, logs, artifacts, or security scan results itself.",
+        recommendation="Disable project-based pipeline visibility unless the broader "
+        "audience is deliberate and approved.",
+        audited_at=audited_at,
+    )
+
+
+def _check_job_token_repository_push_allowed(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    if not snapshot.project.ci_push_repository_for_job_token_allowed:
+        return None
+    return _build_project_setting_finding(
+        check_id=CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
+        title="CI job tokens are permitted to push to the repository",
+        severity=Severity.HIGH,
+        snapshot=snapshot,
+        evidence=(
+            "CI job token repository push (ci_push_repository_for_job_token_allowed) is enabled."
+        ),
+        impact="The CI job token is an ambient credential available to every "
+        "pipeline job; if it can push to the repository, a compromised or "
+        "malicious job gains a repository-write escalation path.",
+        recommendation="Disable this permission unless a specifically reviewed "
+        "automation requires job-token repository push access.",
+        audited_at=audited_at,
+    )
+
+
+def _check_developer_pipeline_variable_override(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    # The normalized model already rejects a missing or unrecognized value
+    # for this field (see `GitLabProjectSettings`); no fallback is added here.
+    if snapshot.project.ci_pipeline_variables_minimum_override_role != _DEVELOPER_OVERRIDE_ROLE:
+        return None
+    return _build_project_setting_finding(
+        check_id=CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
+        title="Pipeline-variable override permissions are more permissive than Maintainer",
+        severity=Severity.HIGH,
+        snapshot=snapshot,
+        evidence=(
+            "The pipeline-variable minimum override role "
+            "(ci_pipeline_variables_minimum_override_role) is 'developer'."
+        ),
+        impact="A role less privileged than Maintainer can override pipeline "
+        "variables at trigger time, which may allow injecting values into "
+        "unsafely interpolated scripts or overriding security-relevant "
+        "variables -- an authorization bypass risk.",
+        recommendation="Change the minimum pipeline-variable override role to "
+        "Maintainer or a more restrictive value.",
+        audited_at=audited_at,
+    )
+
+
+def _check_redundant_pipelines_not_cancelled(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    # Treated as the normalized string enum it is -- never boolean
+    # truthiness or a boolean substitute.
+    if snapshot.project.auto_cancel_pending_pipelines != _AUTO_CANCEL_DISABLED:
+        return None
+    return _build_project_setting_finding(
+        check_id=CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+        title="Redundant pipelines are not automatically cancelled",
+        severity=Severity.LOW,
+        snapshot=snapshot,
+        evidence=(
+            "Automatic cancellation of redundant pending pipelines "
+            "(auto_cancel_pending_pipelines) is 'disabled'."
+        ),
+        impact="With automatic cancellation disabled, superseded pending pipelines "
+        "may continue consuming runner capacity rather than being cancelled in "
+        "favor of a newer run. Interruptible running pipelines may also continue "
+        "consuming runner capacity and compute time instead of being stopped when "
+        "superseded.",
+        recommendation="Enable automatic cancellation of redundant, pending "
+        "pipelines, unless the project intentionally requires every pipeline to "
+        "run to completion for compliance or audit-history purposes.",
+        audited_at=audited_at,
+    )
+
+
+_PROJECT_SETTING_CHECKS = (
+    _check_pipeline_success_not_required,
+    _check_public_jobs_on_non_public_project,
+    _check_job_token_repository_push_allowed,
+    _check_developer_pipeline_variable_override,
+    _check_redundant_pipelines_not_cancelled,
+)
+
+
+def evaluate_project_setting_checks(
+    snapshot: GitLabProjectSnapshot,
+    *,
+    audited_at: dt.datetime,
+) -> list[GitLabFinding]:
+    """Evaluate the five project-setting checks against `snapshot`.
+
+    Covers `GL-MR-001`, `GL-SEC-001`, `GL-SEC-002`, `GL-SEC-003`, and
+    `GL-COST-001` -- kept as a separate entry point from
+    `evaluate_protected_branch_checks` (there is no combined all-GitLab
+    evaluator yet). Operates only on the already-collected, normalized
+    `snapshot`; never retrieves any additional GitLab data (in particular,
+    never calls a CI/CD variables endpoint for `GL-SEC-003`) and never
+    mutates `snapshot`. `audited_at` is used exactly as supplied (never
+    `datetime.now()`) so results are deterministic.
+
+    Findings are returned in stable `GL-MR-001`, `GL-SEC-001`, `GL-SEC-002`,
+    `GL-SEC-003`, `GL-COST-001` order.
+    """
+    findings: list[GitLabFinding] = []
+    for check in _PROJECT_SETTING_CHECKS:
+        finding = check(snapshot, audited_at)
+        if finding is not None:
+            findings.append(finding)
     return findings

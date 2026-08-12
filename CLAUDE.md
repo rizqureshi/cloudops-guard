@@ -10,9 +10,10 @@ regardless of which milestone is currently in progress.
   single-project GitLab CI/CD Audit MVP — see
   `docs/milestones/v0.2.0-gitlab-audit.md` for its objective, command interface,
   checks, invariants and non-goals. GitLab implementation is in progress: the HTTP
-  client foundation, a normalized instance/project/protected-branch collector, and
-  the protected-default-branch checks (`GL-BR-001` through `GL-BR-003`) exist; the
-  remaining project-setting checks, CI Lint/image inspection, GitLab
+  client foundation, a normalized instance/project/protected-branch collector, the
+  protected-default-branch checks (`GL-BR-001` through `GL-BR-003`), and the
+  project-setting checks (`GL-MR-001`, `GL-SEC-001` through `GL-SEC-003`,
+  `GL-COST-001`) exist; `GL-CI-001`, `GL-COST-002`, `GL-REL-001`, GitLab
   evaluator/report integration, and CLI integration do not yet. Do not start
   AKS/EKS-specific code, a database, SaaS multi-tenancy, authentication, a web
   dashboard, billing or LLM integration until a milestone explicitly calls for it.
