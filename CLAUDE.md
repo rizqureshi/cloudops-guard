@@ -10,11 +10,12 @@ regardless of which milestone is currently in progress.
   single-project GitLab CI/CD Audit MVP — see
   `docs/milestones/v0.2.0-gitlab-audit.md` for its objective, command interface,
   checks, invariants and non-goals. GitLab implementation is in progress: the HTTP
-  client foundation and a normalized instance/project/protected-branch collector
-  exist; checks, CLI integration, CI configuration inspection, and report generation
-  do not yet. Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
-  authentication, a web dashboard, billing or LLM integration until a milestone
-  explicitly calls for it.
+  client foundation, a normalized instance/project/protected-branch collector, and
+  the protected-default-branch checks (`GL-BR-001` through `GL-BR-003`) exist; the
+  remaining project-setting checks, CI Lint/image inspection, GitLab
+  evaluator/report integration, and CLI integration do not yet. Do not start
+  AKS/EKS-specific code, a database, SaaS multi-tenancy, authentication, a web
+  dashboard, billing or LLM integration until a milestone explicitly calls for it.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
 - Explain important architectural changes before making them — don't silently restructure

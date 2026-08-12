@@ -1,0 +1,572 @@
+"""Tests for the deterministic GitLab protected-default-branch checks
+(v0.2.0 Phase 2C-A: `GL-BR-001` - `GL-BR-003`, `cloudops_guard.checks.gitlab`).
+
+Only synthetic `GitLabProjectSnapshot`/`GitLabProtectedBranchRule`/
+`GitLabProjectSettings` objects are used -- no `GitLabClient` or
+`GitLabCollector` is instantiated, and no network access occurs. Rule
+matching is exercised only through the public `evaluate_protected_branch_checks`
+entry point (via whether `GL-BR-001` is suppressed or not), consistent with
+this project's convention of testing checks through their public entry
+point rather than private helpers.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+import pytest
+
+from cloudops_guard.checks.gitlab import (
+    CHECK_DEFAULT_BRANCH_NOT_PROTECTED,
+    CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED,
+    CHECK_FORCE_PUSH_ALLOWED,
+    evaluate_protected_branch_checks,
+)
+from cloudops_guard.models import (
+    GitLabProjectSettings,
+    GitLabProjectSnapshot,
+    GitLabProtectedBranchRule,
+    GitLabResourceKind,
+    Severity,
+)
+
+NOW = dt.datetime(2026, 8, 13, 9, 0, tzinfo=dt.UTC)
+
+
+def make_project_settings(**overrides: object) -> GitLabProjectSettings:
+    defaults: dict[str, object] = {
+        "project_id": 42,
+        "project_path": "group/subgroup/project",
+        "default_branch": "main",
+        "visibility": "private",
+        "only_allow_merge_if_pipeline_succeeds": False,
+        "public_jobs": False,
+        "ci_push_repository_for_job_token_allowed": False,
+        "ci_pipeline_variables_minimum_override_role": "maintainer",
+        "auto_cancel_pending_pipelines": "enabled",
+        "ci_default_git_depth": 50,
+        "build_timeout": 3600,
+    }
+    defaults.update(overrides)
+    return GitLabProjectSettings(**defaults)
+
+
+def make_rule(**overrides: object) -> GitLabProtectedBranchRule:
+    defaults: dict[str, object] = {
+        "name": "main",
+        "allow_force_push": False,
+        "role_push_access_levels": [],
+    }
+    defaults.update(overrides)
+    return GitLabProtectedBranchRule(**defaults)
+
+
+def make_snapshot(
+    *,
+    default_branch: str = "main",
+    rules: list[GitLabProtectedBranchRule] | None = None,
+) -> GitLabProjectSnapshot:
+    return GitLabProjectSnapshot(
+        gitlab_url="https://gitlab.example.com",
+        gitlab_version="18.4.1",
+        enterprise=False,
+        collected_at=NOW,
+        project=make_project_settings(default_branch=default_branch),
+        protected_branches=[] if rules is None else rules,
+    )
+
+
+def check_ids(findings: list) -> list[str]:
+    return [f.check_id for f in findings]
+
+
+# --- Rule matching -----------------------------------------------------------
+#
+# Exercised through `evaluate_protected_branch_checks`: a single-rule
+# snapshot suppresses GL-BR-001 exactly when that rule's name matches the
+# default branch, so GL-BR-001's presence/absence is a direct signal of the
+# matching outcome.
+
+
+def test_exact_rule_matches() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="main")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_exact_matching_is_case_sensitive() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="Main")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_wildcard_matching_is_case_sensitive() -> None:
+    snapshot = make_snapshot(default_branch="Release/1.2", rules=[make_rule(name="release/*")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_wildcard_matches_zero_characters() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="main*")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_wildcard_matches_characters_across_slash() -> None:
+    snapshot = make_snapshot(
+        default_branch="master/gitlab/production", rules=[make_rule(name="*gitlab*")]
+    )
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_prefix_wildcard() -> None:
+    snapshot = make_snapshot(default_branch="release/1.2", rules=[make_rule(name="release/*")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_suffix_wildcard() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="*main")])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_middle_wildcard() -> None:
+    snapshot = make_snapshot(
+        default_branch="feature/team/release", rules=[make_rule(name="feature/*/release")]
+    )
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_multiple_wildcard_characters() -> None:
+    snapshot = make_snapshot(
+        default_branch="feature/team/x/release/final", rules=[make_rule(name="feature/*/release/*")]
+    )
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+@pytest.mark.parametrize(
+    ("pattern", "branch"),
+    [
+        ("release.1", "releaseX1"),  # "." must be literal, not "any char"
+        ("a+b", "aab"),  # "+" must be literal, not "one or more"
+        ("a[b]c", "abc"),  # "[b]" must be literal, not a character class
+        ("a(b)c", "abc"),  # "(b)" must be literal, not a group
+        ("a$b", "ab"),  # "$" must be literal, not end-of-string anchor
+        ("a^b", "ab"),  # "^" must be literal, not start-of-string anchor
+    ],
+)
+def test_regex_significant_characters_are_treated_literally(pattern: str, branch: str) -> None:
+    snapshot = make_snapshot(default_branch=branch, rules=[make_rule(name=pattern)])
+    # The pattern does NOT match the branch under literal-character
+    # semantics (only exact-equal or true-regex semantics would differ).
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+@pytest.mark.parametrize("pattern", ["release.1", "a+b", "a[b]c", "a(b)c", "a$b", "a^b"])
+def test_regex_significant_characters_still_match_their_literal_self(pattern: str) -> None:
+    snapshot = make_snapshot(default_branch=pattern, rules=[make_rule(name=pattern)])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_inherited_matching_rule_is_included() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="main", inherited=True)])
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+@pytest.mark.parametrize("inherited", [False, True, None])
+def test_inherited_value_does_not_change_matching(inherited: bool | None) -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", inherited=inherited)]
+    )
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_nonmatching_rules_are_ignored() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="develop"), make_rule(name="release/*")],
+    )
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_snapshot_and_rules_are_not_mutated() -> None:
+    rule = make_rule(name="main", allow_force_push=True, role_push_access_levels=[30])
+    snapshot = make_snapshot(default_branch="main", rules=[rule])
+    original_rules = list(snapshot.protected_branches)
+    original_rule_copy = rule.model_copy(deep=True)
+
+    evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+
+    assert snapshot.protected_branches == original_rules
+    assert snapshot.protected_branches[0] == original_rule_copy
+    assert snapshot.project.default_branch == "main"
+
+
+# --- GL-BR-001 -----------------------------------------------------------------
+
+
+def test_empty_protected_branch_list_produces_exactly_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_DEFAULT_BRANCH_NOT_PROTECTED]
+
+
+def test_nonmatching_exact_rules_produce_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="develop")])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_DEFAULT_BRANCH_NOT_PROTECTED]
+
+
+def test_nonmatching_wildcard_rules_produce_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="release/*")])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_DEFAULT_BRANCH_NOT_PROTECTED]
+
+
+def test_matching_exact_rule_suppresses_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="main")])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(findings)
+
+
+def test_matching_wildcard_rule_suppresses_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="release/1.2", rules=[make_rule(name="release/*")])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(findings)
+
+
+def test_matching_inherited_rule_suppresses_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[make_rule(name="main", inherited=True)])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED not in check_ids(findings)
+
+
+def test_gl_br_001_finding_fields_are_correct() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[])
+    (finding,) = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert finding.check_id == "GL-BR-001"
+    assert finding.title == "Default branch is not protected"
+    assert finding.severity == Severity.HIGH
+    assert finding.project_path == "group/subgroup/project"
+    assert finding.resource_kind == GitLabResourceKind.PROTECTED_BRANCH
+    assert finding.resource_name == "main"
+    assert finding.job_name is None
+    assert finding.auto_remediable is False
+    assert finding.audited_at == NOW
+
+
+def test_gl_br_001_evidence_contains_only_permitted_content() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[])
+    (finding,) = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert "group/subgroup/project" in finding.evidence
+    assert "main" in finding.evidence
+    assert "no" in finding.evidence.lower() and "matched" in finding.evidence.lower()
+
+
+def test_gl_br_001_recommendation_advises_creating_a_rule() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[])
+    (finding,) = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert "protected-branch rule" in finding.recommendation
+
+
+def test_gl_br_001_suppresses_gl_br_002_and_gl_br_003() -> None:
+    # No matching rules at all -- there is nothing for GL-BR-002/003 to
+    # evaluate, so only GL-BR-001 may appear, regardless of what a
+    # nonmatching rule's own fields say.
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="develop", allow_force_push=True, role_push_access_levels=[30])],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_DEFAULT_BRANCH_NOT_PROTECTED]
+
+
+# --- GL-BR-002 -----------------------------------------------------------------
+
+
+def test_matching_rule_with_force_push_true_produces_gl_br_002() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", allow_force_push=True)]
+    )
+    assert CHECK_FORCE_PUSH_ALLOWED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_matching_rule_with_force_push_false_does_not_produce_gl_br_002() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", allow_force_push=False)]
+    )
+    assert CHECK_FORCE_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_multiple_matching_false_rules_do_not_produce_gl_br_002() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", allow_force_push=False),
+            make_rule(name="*", allow_force_push=False),
+        ],
+    )
+    assert CHECK_FORCE_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_true_plus_false_matching_rules_produce_exactly_one_gl_br_002() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", allow_force_push=False),
+            make_rule(name="*", allow_force_push=True),
+        ],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings).count(CHECK_FORCE_PUSH_ALLOWED) == 1
+
+
+def test_force_push_true_on_a_nonmatching_rule_does_not_produce_gl_br_002() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", allow_force_push=False),
+            make_rule(name="develop", allow_force_push=True),
+        ],
+    )
+    assert CHECK_FORCE_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_gl_br_002_finding_fields_and_evidence_are_correct() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", allow_force_push=True)]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_FORCE_PUSH_ALLOWED]
+    assert finding.title == "Force-push is allowed on the default branch"
+    assert finding.severity == Severity.HIGH
+    assert finding.project_path == "group/subgroup/project"
+    assert finding.resource_kind == GitLabResourceKind.PROTECTED_BRANCH
+    assert finding.resource_name == "main"
+    assert finding.job_name is None
+    assert finding.auto_remediable is False
+    assert finding.audited_at == NOW
+    assert "main" in finding.evidence
+    assert "allowed" in finding.evidence.lower()
+    assert "force-push" in finding.evidence.lower() or "force push" in finding.evidence.lower()
+    assert "disable" in finding.recommendation.lower()
+
+
+# --- GL-BR-003 -----------------------------------------------------------------
+
+
+def test_developer_level_on_matching_rule_produces_gl_br_003() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    assert CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+@pytest.mark.parametrize("level", [0, 40, 60])
+def test_non_developer_levels_do_not_produce_gl_br_003(level: int) -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[level])]
+    )
+    assert CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_empty_role_list_does_not_produce_gl_br_003() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[])]
+    )
+    assert CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_developer_plus_restrictive_matching_rules_produce_exactly_one_gl_br_003() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", role_push_access_levels=[40]),
+            make_rule(name="*", role_push_access_levels=[30]),
+        ],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings).count(CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED) == 1
+
+
+def test_developer_on_a_nonmatching_rule_does_not_produce_gl_br_003() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", role_push_access_levels=[40]),
+            make_rule(name="develop", role_push_access_levels=[30]),
+        ],
+    )
+    assert CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED not in check_ids(
+        evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    )
+
+
+def test_gl_br_003_finding_fields_and_evidence_are_correct() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+    assert finding.title == "Developers can push directly to the default branch"
+    assert finding.severity == Severity.MEDIUM
+    assert finding.project_path == "group/subgroup/project"
+    assert finding.resource_kind == GitLabResourceKind.PROTECTED_BRANCH
+    assert finding.resource_name == "main"
+    assert finding.job_name is None
+    assert finding.auto_remediable is False
+    assert finding.audited_at == NOW
+
+
+def test_gl_br_003_evidence_states_a_grant_not_observed_usage() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+    assert "granted" in finding.evidence.lower()
+    assert "not proof" in finding.evidence.lower() or "not observed" in finding.evidence.lower()
+
+
+def test_gl_br_003_evidence_limits_scope_to_role_based_developer_access() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+    evidence_lower = finding.evidence.lower()
+    assert "user-specific" in evidence_lower
+    assert "group-specific" in evidence_lower
+    assert "deploy-key-specific" in evidence_lower
+    assert "custom-role" in evidence_lower
+    assert "not evaluated" in evidence_lower
+
+
+def test_gl_br_003_evidence_contains_no_identifiers() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+    for forbidden in ("user_id", "group_id", "deploy_key_id", "member_role_id"):
+        assert forbidden not in finding.evidence
+
+
+def test_gl_br_003_recommendation_advises_restricting_to_maintainer() -> None:
+    snapshot = make_snapshot(
+        default_branch="main", rules=[make_rule(name="main", role_push_access_levels=[30])]
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    (finding,) = [f for f in findings if f.check_id == CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+    assert "maintainer" in finding.recommendation.lower()
+    assert "no one" in finding.recommendation.lower()
+    assert "merge request" in finding.recommendation.lower()
+
+
+# --- Combined behavior ---------------------------------------------------------
+
+
+def test_matching_rule_with_force_push_and_developer_produces_both_in_stable_order() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="main", allow_force_push=True, role_push_access_levels=[30])],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_FORCE_PUSH_ALLOWED, CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+
+
+def test_no_matching_rule_produces_only_gl_br_001() -> None:
+    snapshot = make_snapshot(default_branch="main", rules=[])
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_DEFAULT_BRANCH_NOT_PROTECTED]
+
+
+def test_safe_matching_rules_produce_no_findings() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="main", allow_force_push=False, role_push_access_levels=[40])],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert findings == []
+
+
+def test_every_finding_uses_the_supplied_audited_at_exactly() -> None:
+    when = dt.datetime(2030, 1, 1, 3, 30, tzinfo=dt.UTC)
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="main", allow_force_push=True, role_push_access_levels=[30])],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=when)
+    assert len(findings) == 2
+    for finding in findings:
+        assert finding.audited_at == when
+
+
+def test_duplicate_matching_rules_never_create_duplicate_findings() -> None:
+    snapshot = make_snapshot(
+        default_branch="main",
+        rules=[
+            make_rule(name="main", allow_force_push=True, role_push_access_levels=[30]),
+            make_rule(name="main", allow_force_push=True, role_push_access_levels=[30]),
+            make_rule(name="*", allow_force_push=True, role_push_access_levels=[30]),
+        ],
+    )
+    findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
+    assert check_ids(findings) == [CHECK_FORCE_PUSH_ALLOWED, CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED]
+
+
+def test_check_constants_are_exact_and_stable() -> None:
+    assert CHECK_DEFAULT_BRANCH_NOT_PROTECTED == "GL-BR-001"
+    assert CHECK_FORCE_PUSH_ALLOWED == "GL-BR-002"
+    assert CHECK_DEVELOPER_DIRECT_PUSH_ALLOWED == "GL-BR-003"
+
+
+def test_check_titles_are_exact_and_stable() -> None:
+    no_rules_snapshot = make_snapshot(default_branch="main", rules=[])
+    (br001,) = evaluate_protected_branch_checks(no_rules_snapshot, audited_at=NOW)
+    assert br001.title == "Default branch is not protected"
+
+    unsafe_snapshot = make_snapshot(
+        default_branch="main",
+        rules=[make_rule(name="main", allow_force_push=True, role_push_access_levels=[30])],
+    )
+    br002, br003 = evaluate_protected_branch_checks(unsafe_snapshot, audited_at=NOW)
+    assert br002.title == "Force-push is allowed on the default branch"
+    assert br003.title == "Developers can push directly to the default branch"
