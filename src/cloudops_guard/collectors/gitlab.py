@@ -696,15 +696,34 @@ def _require_positive_int_field(payload: Mapping[str, Any], field: str) -> int:
     return value
 
 
-def _require_optional_non_negative_int_field(payload: Mapping[str, Any], field: str) -> int | None:
+_GIT_DEPTH_MIN = 0
+_GIT_DEPTH_MAX = 1000
+
+
+def _require_git_depth_field(payload: Mapping[str, Any], field: str) -> int | None:
+    """Validate `ci_default_git_depth`: a non-boolean int in [0, 1000], or null.
+
+    Named for this specific, bounded Git-depth contract rather than a
+    general "optional non-negative int" helper, since GitLab validates
+    this field to exactly this range (0-1000) -- see the Phase 2C-D1
+    investigation in `docs/milestones/v0.2.0-gitlab-audit.md`. A value
+    outside that range, or of the wrong type, is a malformed response, not
+    a legitimate GitLab state; `null` is the sole accepted non-integer
+    value and is retained as `None`.
+    """
     if field not in payload:
         raise GitLabClientError(f"GitLab project response is missing required field '{field}'.")
     value = payload[field]
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not (_GIT_DEPTH_MIN <= value <= _GIT_DEPTH_MAX)
+    ):
         raise GitLabClientError(
-            f"GitLab project field '{field}' must be a non-negative integer or null."
+            f"GitLab project field '{field}' must be an integer between "
+            f"{_GIT_DEPTH_MIN} and {_GIT_DEPTH_MAX} or null."
         )
     return value
 
@@ -744,7 +763,7 @@ def _normalize_project_settings(payload: object) -> GitLabProjectSettings:
     auto_cancel_pending_pipelines = _require_enum_field(
         payload, "auto_cancel_pending_pipelines", _ALLOWED_AUTO_CANCEL
     )
-    ci_default_git_depth = _require_optional_non_negative_int_field(payload, "ci_default_git_depth")
+    ci_default_git_depth = _require_git_depth_field(payload, "ci_default_git_depth")
     build_timeout = _require_positive_int_field(payload, "build_timeout")
 
     return GitLabProjectSettings(

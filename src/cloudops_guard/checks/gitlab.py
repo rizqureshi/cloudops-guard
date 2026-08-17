@@ -1,4 +1,4 @@
-"""Deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C).
+"""Deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C/2C-D2).
 
 Each check operates only on the normalized `GitLabProjectSnapshot` produced
 by the Phase 2B collector (`cloudops_guard.collectors.gitlab.GitLabCollector`)
@@ -15,10 +15,12 @@ kept as a separate entry point rather than folded into the protected-branch
 one. Phase 2C-C adds `GL-REL-001` (entry point `evaluate_job_timeout_check`),
 also kept as its own separate entry point -- it requires a caller-supplied
 `job_timeout_threshold_seconds` with no product-level default yet, so it is
-not folded into `evaluate_project_setting_checks` either. There is still no
-combined all-GitLab evaluator. `GL-COST-002`, `GL-CI-001` image inspection,
-evaluator/report integration, and CLI wiring remain separate, later work --
-see `docs/milestones/v0.2.0-gitlab-audit.md`.
+not folded into `evaluate_project_setting_checks` either. Phase 2C-D2 adds
+`GL-COST-002` into `evaluate_project_setting_checks` (it needs no additional
+argument beyond the normalized snapshot). There is still no combined
+all-GitLab evaluator. `GL-CI-001` image inspection, evaluator/report
+integration, and CLI wiring remain separate, later work -- see
+`docs/milestones/v0.2.0-gitlab-audit.md`.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ CHECK_BROAD_PIPELINE_VISIBILITY = "GL-SEC-001"
 CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED = "GL-SEC-002"
 CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED = "GL-SEC-003"
 CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED = "GL-COST-001"
+CHECK_UNLIMITED_GIT_CLONE_DEPTH = "GL-COST-002"
 CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD = "GL-REL-001"
 
 _DEVELOPER_ROLE_LEVEL = 30
@@ -408,12 +411,83 @@ def _check_redundant_pipelines_not_cancelled(
     )
 
 
+def _check_unlimited_git_clone_depth(
+    snapshot: GitLabProjectSnapshot, audited_at: dt.datetime
+) -> GitLabFinding | None:
+    # Explicit equality/identity checks, not truthiness: `0` and `None` are
+    # the two distinct API representations that the Phase 2C-D1
+    # investigation proved both mean unlimited/full history (GitLab
+    # coerces a null default to 0 before sending it to GitLab Runner). A
+    # bounded positive depth (1-1000) must never trigger this. Using
+    # `if not git_depth:` would conflate "0" and "None" and make the
+    # distinction unreviewable; each is handled and worded separately here.
+    git_depth = snapshot.project.ci_default_git_depth
+    if git_depth == 0:
+        evidence = "Configured project default Git clone depth: 0 (unlimited/full history)."
+    elif git_depth is None:
+        evidence = (
+            "Configured project default Git clone depth: unset (null), which "
+            "GitLab treats as unlimited/full history."
+        )
+    else:
+        return None
+    return _build_project_setting_finding(
+        check_id=CHECK_UNLIMITED_GIT_CLONE_DEPTH,
+        title="Git clone depth is unlimited",
+        severity=Severity.LOW,
+        snapshot=snapshot,
+        evidence=evidence,
+        impact=(
+            "When this project default applies, CI jobs that obtain repository "
+            "sources may fetch full history, potentially increasing network "
+            "transfer, checkout duration, runner usage, and compute cost -- "
+            "particularly for large or long-lived repositories. This "
+            "configuration does not prove that additional cost, transfer, or "
+            "delay actually occurred. CloudOps Guard did not inspect pipelines, "
+            "jobs, repository history, clone traffic, or runner usage. This "
+            "finding evaluates only the project-level default Git clone depth. "
+            "It does not inspect job-level or pipeline-level GIT_DEPTH variable "
+            "overrides, which can set an effectively unlimited depth when the "
+            "project default is bounded, or a bounded depth when the project "
+            "default is unlimited."
+        ),
+        recommendation=(
+            "Set a bounded positive project default Git clone depth appropriate "
+            "for the project's branching, tagging, and history requirements. "
+            "Unlimited history may be intentional and legitimate for work such "
+            "as versioning or changelog generation across complete tag/history "
+            "information."
+        ),
+        audited_at=audited_at,
+    )
+
+
+def evaluate_git_clone_depth_check(
+    snapshot: GitLabProjectSnapshot,
+    *,
+    audited_at: dt.datetime,
+) -> GitLabFinding | None:
+    """Evaluate `GL-COST-002` in isolation.
+
+    Produces the same result as `GL-COST-002` within
+    `evaluate_project_setting_checks` -- provided as its own focused,
+    standalone entry point in addition to being included there, since it
+    requires no additional argument beyond the normalized snapshot and
+    evaluates an existing normalized project setting. Operates only on
+    `snapshot.project.ci_default_git_depth`; never retrieves any
+    additional GitLab data and never mutates `snapshot`. `audited_at` is
+    used exactly as supplied (never `datetime.now()`).
+    """
+    return _check_unlimited_git_clone_depth(snapshot, audited_at)
+
+
 _PROJECT_SETTING_CHECKS = (
     _check_pipeline_success_not_required,
     _check_public_jobs_on_non_public_project,
     _check_job_token_repository_push_allowed,
     _check_developer_pipeline_variable_override,
     _check_redundant_pipelines_not_cancelled,
+    _check_unlimited_git_clone_depth,
 )
 
 
@@ -422,19 +496,23 @@ def evaluate_project_setting_checks(
     *,
     audited_at: dt.datetime,
 ) -> list[GitLabFinding]:
-    """Evaluate the five project-setting checks against `snapshot`.
+    """Evaluate the six project-setting checks against `snapshot`.
 
-    Covers `GL-MR-001`, `GL-SEC-001`, `GL-SEC-002`, `GL-SEC-003`, and
-    `GL-COST-001` -- kept as a separate entry point from
+    Covers `GL-MR-001`, `GL-SEC-001`, `GL-SEC-002`, `GL-SEC-003`,
+    `GL-COST-001`, and `GL-COST-002` -- kept as a separate entry point from
     `evaluate_protected_branch_checks` (there is no combined all-GitLab
-    evaluator yet). Operates only on the already-collected, normalized
-    `snapshot`; never retrieves any additional GitLab data (in particular,
-    never calls a CI/CD variables endpoint for `GL-SEC-003`) and never
-    mutates `snapshot`. `audited_at` is used exactly as supplied (never
-    `datetime.now()`) so results are deterministic.
+    evaluator yet). `GL-REL-001` is deliberately not included here: it
+    still requires an explicit, caller-supplied threshold with no
+    product-level default, so it stays on its own entry point
+    (`evaluate_job_timeout_check`). Operates only on the already-collected,
+    normalized `snapshot`; never retrieves any additional GitLab data (in
+    particular, never calls a CI/CD variables endpoint for `GL-SEC-003`,
+    and never inspects job-level `GIT_DEPTH` overrides for `GL-COST-002`)
+    and never mutates `snapshot`. `audited_at` is used exactly as supplied
+    (never `datetime.now()`) so results are deterministic.
 
     Findings are returned in stable `GL-MR-001`, `GL-SEC-001`, `GL-SEC-002`,
-    `GL-SEC-003`, `GL-COST-001` order.
+    `GL-SEC-003`, `GL-COST-001`, `GL-COST-002` order.
     """
     findings: list[GitLabFinding] = []
     for check in _PROJECT_SETTING_CHECKS:

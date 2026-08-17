@@ -215,7 +215,11 @@ class GitLabProjectSettings(BaseModel):
     for that field's presence with a safe value. `ci_default_git_depth` is
     the sole exception: it may legitimately be `null` on GitLab's side, so
     `None` is an accepted value, but the field itself is still required --
-    a response missing the key entirely still fails.
+    a response missing the key entirely still fails. GitLab validates
+    `ci_default_git_depth` to the range 0-1000 (see the Phase 2C-D1
+    investigation in `docs/milestones/v0.2.0-gitlab-audit.md`); a value
+    outside that range indicates a malformed response, not a legitimate
+    GitLab state.
     """
 
     project_id: StrictInt = Field(gt=0)
@@ -229,7 +233,7 @@ class GitLabProjectSettings(BaseModel):
         "no_one_allowed", "owner", "maintainer", "developer"
     ]
     auto_cancel_pending_pipelines: Literal["enabled", "disabled"]
-    ci_default_git_depth: StrictInt | None = Field(ge=0)
+    ci_default_git_depth: StrictInt | None = Field(ge=0, le=1000)
     build_timeout: StrictInt = Field(gt=0)
 
 

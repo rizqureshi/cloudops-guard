@@ -1,8 +1,8 @@
-"""Tests for the deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C,
+"""Tests for the deterministic GitLab checks (v0.2.0 Phase 2C-A/2C-B/2C-C/2C-D2,
 `cloudops_guard.checks.gitlab`): the protected-default-branch checks
 (`GL-BR-001` - `GL-BR-003`), the project-setting checks (`GL-MR-001`,
-`GL-SEC-001` - `GL-SEC-003`, `GL-COST-001`), and the job timeout check
-(`GL-REL-001`).
+`GL-SEC-001` - `GL-SEC-003`, `GL-COST-001`, `GL-COST-002`), and the job
+timeout check (`GL-REL-001`).
 
 Only synthetic `GitLabProjectSnapshot`/`GitLabProtectedBranchRule`/
 `GitLabProjectSettings` objects are used -- no `GitLabClient` or
@@ -29,6 +29,8 @@ from cloudops_guard.checks.gitlab import (
     CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
     CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
     CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+    CHECK_UNLIMITED_GIT_CLONE_DEPTH,
+    evaluate_git_clone_depth_check,
     evaluate_job_timeout_check,
     evaluate_project_setting_checks,
     evaluate_protected_branch_checks,
@@ -101,6 +103,7 @@ def make_project_setting_snapshot(**overrides: object) -> GitLabProjectSnapshot:
         "ci_push_repository_for_job_token_allowed": False,
         "ci_pipeline_variables_minimum_override_role": "maintainer",
         "auto_cancel_pending_pipelines": "enabled",
+        "ci_default_git_depth": 50,
     }
     defaults.update(overrides)
     return make_snapshot(rules=[], **defaults)
@@ -998,10 +1001,184 @@ def test_gl_cost_001_recommendation_recognizes_compliance_audit_history_exceptio
     assert "intentionally requires" in recommendation_lower
 
 
-# --- Combined behavior (project-setting checks) ---------------------------------
+# --- GL-COST-002 -----------------------------------------------------------------
 
 
-def test_all_five_unsafe_settings_produce_findings_in_stable_order() -> None:
+def test_zero_git_depth_produces_exactly_one_finding() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
+    assert [f.check_id for f in findings] == [CHECK_UNLIMITED_GIT_CLONE_DEPTH]
+
+
+def test_null_git_depth_produces_exactly_one_finding() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=None)
+    findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
+    assert [f.check_id for f in findings] == [CHECK_UNLIMITED_GIT_CLONE_DEPTH]
+
+
+def test_standalone_entry_point_matches_combined_entry_point_for_zero() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    standalone = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    (combined,) = [
+        f
+        for f in evaluate_project_setting_checks(snapshot, audited_at=NOW)
+        if f.check_id == CHECK_UNLIMITED_GIT_CLONE_DEPTH
+    ]
+    assert standalone is not None
+    assert standalone == combined
+
+
+def test_standalone_entry_point_returns_none_for_a_safe_depth() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=50)
+    assert evaluate_git_clone_depth_check(snapshot, audited_at=NOW) is None
+
+
+def test_evidence_distinguishes_literal_zero_from_null() -> None:
+    zero_snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    null_snapshot = make_project_setting_snapshot(ci_default_git_depth=None)
+    zero_finding = evaluate_git_clone_depth_check(zero_snapshot, audited_at=NOW)
+    null_finding = evaluate_git_clone_depth_check(null_snapshot, audited_at=NOW)
+    assert zero_finding is not None
+    assert null_finding is not None
+    assert zero_finding.evidence != null_finding.evidence
+    assert "0" in zero_finding.evidence
+    assert "unlimited/full history" in zero_finding.evidence
+    assert "null" in null_finding.evidence.lower()
+    assert "unset" in null_finding.evidence.lower()
+    assert "unlimited/full history" in null_finding.evidence
+    # The null finding must never claim the API literally returned zero.
+    assert "0 (" not in null_finding.evidence
+    assert ": 0" not in null_finding.evidence
+
+
+@pytest.mark.parametrize("value", [1, 2, 50, 500, 999, 1000])
+def test_positive_git_depth_values_produce_no_finding(value: int) -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=value)
+    findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
+    assert CHECK_UNLIMITED_GIT_CLONE_DEPTH not in [f.check_id for f in findings]
+    assert evaluate_git_clone_depth_check(snapshot, audited_at=NOW) is None
+
+
+def test_boundary_value_1_produces_no_finding() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=1)
+    assert evaluate_git_clone_depth_check(snapshot, audited_at=NOW) is None
+
+
+def test_boundary_value_1000_produces_no_finding() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=1000)
+    assert evaluate_git_clone_depth_check(snapshot, audited_at=NOW) is None
+
+
+def test_gl_cost_002_finding_fields_are_correct() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    _common_fields_are_correct(finding, CHECK_UNLIMITED_GIT_CLONE_DEPTH)
+    assert finding.title == "Git clone depth is unlimited"
+    assert finding.severity == Severity.LOW
+
+
+def test_gl_cost_002_impact_uses_conditional_wording_and_no_observed_cost_claim() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    impact_lower = finding.impact.lower()
+    assert "may fetch full history" in impact_lower
+    assert (
+        "does not prove that additional cost, transfer, or delay actually occurred" in impact_lower
+    )
+    assert (
+        "did not inspect pipelines, jobs, repository history, clone traffic, or runner usage"
+        in (impact_lower)
+    )
+    # No unqualified claim that cost/transfer/delay was actually incurred.
+    assert "was consumed" not in impact_lower
+    assert "was wasted" not in impact_lower
+    assert "increased cost" not in impact_lower
+
+
+def test_gl_cost_002_impact_mentions_relevant_cost_dimensions() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    impact_lower = finding.impact.lower()
+    for term in ("network transfer", "checkout duration", "runner usage", "compute cost"):
+        assert term in impact_lower
+
+
+def test_gl_cost_002_recommendation_acknowledges_legitimate_full_history_use() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    recommendation_lower = finding.recommendation.lower()
+    assert "bounded positive" in recommendation_lower
+    assert "intentional" in recommendation_lower
+    assert "versioning" in recommendation_lower or "changelog" in recommendation_lower
+
+
+def test_gl_cost_002_recommendation_does_not_prescribe_one_universal_depth() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    recommendation_lower = finding.recommendation.lower()
+    # No single hardcoded numeric depth is prescribed as *the* recommended value.
+    assert "set to 20" not in recommendation_lower
+    assert "recommended depth" not in recommendation_lower
+
+
+def test_gl_cost_002_scope_limitation_mentions_project_default_and_git_depth_overrides() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    combined_lower = finding.impact.lower()
+    assert "evaluates only the project-level default git clone depth" in combined_lower
+    assert "job-level or pipeline-level git_depth variable overrides" in combined_lower
+
+
+def test_gl_cost_002_wording_contains_no_job_pipeline_or_credential_data() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert finding is not None
+    combined = finding.evidence + finding.impact + finding.recommendation
+    combined_lower = combined.lower()
+    for forbidden in (
+        "job_name",
+        "trace",
+        "artifact",
+        "credential",
+        "token",
+        "runner id",
+        "pipeline_id",
+        "job_id",
+    ):
+        assert forbidden not in combined_lower
+
+
+def test_gl_cost_002_does_not_mutate_snapshot() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    original_project = snapshot.project.model_copy(deep=True)
+    evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert snapshot.project == original_project
+
+
+def test_gl_cost_002_repeated_evaluation_is_deterministic() -> None:
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=None)
+    first = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    second = evaluate_git_clone_depth_check(snapshot, audited_at=NOW)
+    assert first == second
+
+
+def test_gl_cost_002_uses_supplied_audited_at_exactly() -> None:
+    when = dt.datetime(2033, 2, 2, 2, 0, tzinfo=dt.UTC)
+    snapshot = make_project_setting_snapshot(ci_default_git_depth=0)
+    finding = evaluate_git_clone_depth_check(snapshot, audited_at=when)
+    assert finding is not None
+    assert finding.audited_at == when
+
+
+def test_gl_cost_002_does_not_affect_the_other_five_project_setting_checks() -> None:
+    # A safe positive clone depth must not suppress or alter any of the
+    # other five project-setting checks' independently-triggered findings.
     snapshot = make_project_setting_snapshot(
         only_allow_merge_if_pipeline_succeeds=False,
         visibility="private",
@@ -1009,6 +1186,7 @@ def test_all_five_unsafe_settings_produce_findings_in_stable_order() -> None:
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=50,
     )
     findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
     assert [f.check_id for f in findings] == [
@@ -1017,6 +1195,76 @@ def test_all_five_unsafe_settings_produce_findings_in_stable_order() -> None:
         CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
         CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
         CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+    ]
+
+
+def test_gl_rel_001_behavior_is_unchanged_by_gl_cost_002_addition() -> None:
+    # Regression guard: adding GL-COST-002 must not alter GL-REL-001's
+    # independent entry point or its results.
+    snapshot = make_snapshot(rules=[], build_timeout=3600)
+    finding = evaluate_job_timeout_check(
+        snapshot, audited_at=NOW, job_timeout_threshold_seconds=1800
+    )
+    assert finding is not None
+    assert finding.check_id == CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD
+    assert finding.title == "Project job timeout exceeds a configurable threshold"
+
+
+def test_gl_cost_002_evaluation_performs_no_io() -> None:
+    # Structural guard: both entry points take only an in-memory snapshot
+    # and a datetime -- there is no client/collector argument through which
+    # network, filesystem, or subprocess access could occur.
+    import inspect
+
+    from cloudops_guard.checks import gitlab as gitlab_checks
+
+    for func in (gitlab_checks.evaluate_git_clone_depth_check, evaluate_project_setting_checks):
+        parameters = inspect.signature(func).parameters
+        assert set(parameters) <= {"snapshot", "audited_at"}
+
+
+# --- Combined behavior (project-setting checks) ---------------------------------
+
+
+def test_all_six_unsafe_settings_produce_findings_in_stable_order() -> None:
+    snapshot = make_project_setting_snapshot(
+        only_allow_merge_if_pipeline_succeeds=False,
+        visibility="private",
+        public_jobs=True,
+        ci_push_repository_for_job_token_allowed=True,
+        ci_pipeline_variables_minimum_override_role="developer",
+        auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
+    )
+    findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
+    assert [f.check_id for f in findings] == [
+        CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
+        CHECK_BROAD_PIPELINE_VISIBILITY,
+        CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
+        CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
+        CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+        CHECK_UNLIMITED_GIT_CLONE_DEPTH,
+    ]
+
+
+def test_all_six_unsafe_settings_produce_findings_in_stable_order_with_null_depth() -> None:
+    snapshot = make_project_setting_snapshot(
+        only_allow_merge_if_pipeline_succeeds=False,
+        visibility="private",
+        public_jobs=True,
+        ci_push_repository_for_job_token_allowed=True,
+        ci_pipeline_variables_minimum_override_role="developer",
+        auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=None,
+    )
+    findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
+    assert [f.check_id for f in findings] == [
+        CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
+        CHECK_BROAD_PIPELINE_VISIBILITY,
+        CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
+        CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
+        CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+        CHECK_UNLIMITED_GIT_CLONE_DEPTH,
     ]
 
 
@@ -1034,9 +1282,10 @@ def test_every_project_setting_finding_uses_the_supplied_audited_at_exactly() ->
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     findings = evaluate_project_setting_checks(snapshot, audited_at=when)
-    assert len(findings) == 5
+    assert len(findings) == 6
     for finding in findings:
         assert finding.audited_at == when
 
@@ -1054,6 +1303,7 @@ def test_project_setting_check_constants_are_exact_and_stable() -> None:
     assert CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED == "GL-SEC-002"
     assert CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED == "GL-SEC-003"
     assert CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED == "GL-COST-001"
+    assert CHECK_UNLIMITED_GIT_CLONE_DEPTH == "GL-COST-002"
 
 
 def test_project_setting_check_titles_are_exact_and_stable() -> None:
@@ -1064,6 +1314,7 @@ def test_project_setting_check_titles_are_exact_and_stable() -> None:
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
     titles = {f.check_id: f.title for f in findings}
@@ -1082,6 +1333,7 @@ def test_project_setting_check_titles_are_exact_and_stable() -> None:
     assert titles[CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED] == (
         "Redundant pipelines are not automatically cancelled"
     )
+    assert titles[CHECK_UNLIMITED_GIT_CLONE_DEPTH] == "Git clone depth is unlimited"
 
 
 @pytest.mark.parametrize(
@@ -1101,6 +1353,8 @@ def test_project_setting_check_titles_are_exact_and_stable() -> None:
             CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
         ),
         ({"auto_cancel_pending_pipelines": "disabled"}, CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED),
+        ({"ci_default_git_depth": 0}, CHECK_UNLIMITED_GIT_CLONE_DEPTH),
+        ({"ci_default_git_depth": None}, CHECK_UNLIMITED_GIT_CLONE_DEPTH),
     ],
 )
 def test_one_unsafe_field_does_not_trigger_unrelated_checks(
@@ -1119,9 +1373,10 @@ def test_every_project_setting_finding_has_resource_kind_project() -> None:
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
-    assert len(findings) == 5
+    assert len(findings) == 6
     for finding in findings:
         assert finding.resource_kind == GitLabResourceKind.PROJECT
 
@@ -1134,9 +1389,10 @@ def test_every_project_setting_finding_uses_project_path_as_resource_name() -> N
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
-    assert len(findings) == 5
+    assert len(findings) == 6
     for finding in findings:
         assert finding.resource_name == snapshot.project.project_path
 
@@ -1149,6 +1405,7 @@ def test_project_setting_findings_do_not_depend_on_protected_branch_rules() -> N
         "ci_push_repository_for_job_token_allowed": True,
         "ci_pipeline_variables_minimum_override_role": "developer",
         "auto_cancel_pending_pipelines": "disabled",
+        "ci_default_git_depth": 0,
     }
     no_rules = make_snapshot(default_branch="main", rules=[], **common_overrides)
     with_rules = make_snapshot(
@@ -1169,6 +1426,7 @@ def test_duplicate_evaluation_does_not_mutate_state_or_change_output() -> None:
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     original_project = snapshot.project.model_copy(deep=True)
     first = evaluate_project_setting_checks(snapshot, audited_at=NOW)
@@ -1192,6 +1450,7 @@ def test_protected_branch_checks_are_unaffected_by_project_setting_evaluation() 
         ci_push_repository_for_job_token_allowed=True,
         ci_pipeline_variables_minimum_override_role="developer",
         auto_cancel_pending_pipelines="disabled",
+        ci_default_git_depth=0,
     )
     branch_findings = evaluate_protected_branch_checks(snapshot, audited_at=NOW)
     setting_findings = evaluate_project_setting_checks(snapshot, audited_at=NOW)
@@ -1205,6 +1464,7 @@ def test_protected_branch_checks_are_unaffected_by_project_setting_evaluation() 
         CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
         CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED,
         CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
+        CHECK_UNLIMITED_GIT_CLONE_DEPTH,
     ]
 
 

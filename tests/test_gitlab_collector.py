@@ -420,8 +420,14 @@ def test_missing_required_project_field_raises(field: str) -> None:
         ("ci_pipeline_variables_minimum_override_role", 1),
         ("auto_cancel_pending_pipelines", True),
         ("ci_default_git_depth", True),
+        ("ci_default_git_depth", False),
         ("ci_default_git_depth", "50"),
         ("ci_default_git_depth", -1),
+        ("ci_default_git_depth", 1001),
+        ("ci_default_git_depth", 999_999_999),
+        ("ci_default_git_depth", 1.5),
+        ("ci_default_git_depth", [1]),
+        ("ci_default_git_depth", {}),
         ("build_timeout", True),
         ("build_timeout", "3600"),
         ("build_timeout", 0),
@@ -496,6 +502,41 @@ def test_zero_ci_default_git_depth_is_retained() -> None:
     )
     snapshot = make_collector(transport).collect_project_snapshot(42)
     assert snapshot.project.ci_default_git_depth == 0
+
+
+@pytest.mark.parametrize("value", [0, 1, 1000])
+def test_ci_default_git_depth_boundary_values_are_accepted_unchanged(value: int) -> None:
+    transport = (
+        FakeTransport()
+        .queue(json_response(200, metadata_payload()))
+        .queue(json_response(200, project_payload(ci_default_git_depth=value)))
+        .queue(json_response(200, [], _link_header(None)))
+    )
+    snapshot = make_collector(transport).collect_project_snapshot(42)
+    assert snapshot.project.ci_default_git_depth == value
+
+
+@pytest.mark.parametrize("value", [1001, 1_000_000_000])
+def test_ci_default_git_depth_above_1000_is_rejected(value: int) -> None:
+    transport = (
+        FakeTransport()
+        .queue(json_response(200, metadata_payload()))
+        .queue(json_response(200, project_payload(ci_default_git_depth=value)))
+    )
+    with pytest.raises(GitLabClientError, match="between 0 and 1000"):
+        make_collector(transport).collect_project_snapshot(42)
+
+
+def test_ci_default_git_depth_rejected_value_not_reproduced_in_exception() -> None:
+    sentinel_value = 123_456_789
+    transport = (
+        FakeTransport()
+        .queue(json_response(200, metadata_payload()))
+        .queue(json_response(200, project_payload(ci_default_git_depth=sentinel_value)))
+    )
+    with pytest.raises(GitLabClientError) as excinfo:
+        make_collector(transport).collect_project_snapshot(42)
+    assert str(sentinel_value) not in str(excinfo.value)
 
 
 # (missing ci_default_git_depth is covered by test_missing_required_project_field_raises)
