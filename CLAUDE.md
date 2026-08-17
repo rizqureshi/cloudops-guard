@@ -17,11 +17,14 @@ regardless of which milestone is currently in progress.
   separate CI Lint collection/normalization together with `GL-CI-001`, the
   combined GitLab evaluator (`evaluate_gitlab` in
   `src/cloudops_guard/engine/evaluator.py`, which builds `GitLabAuditReport`),
-  and GitLab JSON/HTML report-file rendering (`generate_gitlab_reports` in
+  GitLab JSON/HTML report-file rendering (`generate_gitlab_reports` in
   `src/cloudops_guard/reports/generator.py`, with its own
-  `gitlab_report.html.j2` template) exist; CLI integration does not yet.
-  Kubernetes report generation (`generate_reports`, `report.html.j2`) remains a
-  separate, unchanged contract.
+  `gitlab_report.html.j2` template), and end-to-end CLI integration
+  (`cloudops-guard audit gitlab --gitlab-url ... --project ...
+  --job-timeout-threshold-seconds ... --output ...`, Phase 2E-A) exist.
+  Kubernetes report generation (`generate_reports`, `report.html.j2`) and the
+  Kubernetes CLI command remain a separate, unchanged contract. Controlled
+  live GitLab acceptance testing and release preparation remain outstanding.
   Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
   authentication, a web dashboard, billing or LLM integration until a milestone
   explicitly calls for it.
