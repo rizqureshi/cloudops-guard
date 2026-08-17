@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CloudOps Guard - GitLab Audit Report</title>
+<style>
+  :root {
+    --critical: #b91c1c;
+    --high: #c2410c;
+    --medium: #a16207;
+    --low: #1d4ed8;
+    --bg: #ffffff;
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --panel: #f9fafb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 2rem; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .summary {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 2rem;
+  }
+  .summary-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    min-width: 120px;
+    background: var(--panel);
+  }
+  .summary-card .count { font-size: 2rem; font-weight: 700; }
+  .summary-card .label { color: var(--muted); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+  .summary-card.critical .count { color: var(--critical); }
+  .summary-card.high .count { color: var(--high); }
+  .summary-card.medium .count { color: var(--medium); }
+  .summary-card.low .count { color: var(--low); }
+  .severity-section { margin-bottom: 2.5rem; }
+  .severity-heading {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .severity-heading.critical { background: var(--critical); }
+  .severity-heading.high { background: var(--high); }
+  .severity-heading.medium { background: var(--medium); }
+  .severity-heading.low { background: var(--low); }
+  .finding {
+    border: 1px solid var(--border);
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1rem;
+    background: var(--panel);
+  }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--medium); }
+  .finding.low { border-left-color: var(--low); }
+  .finding h3 { margin: 0 0 0.25rem; }
+  .finding .locator { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  .finding dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
+  .finding dt { color: var(--muted); font-size: 0.85rem; }
+  .finding dd { margin: 0; }
+  .check-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; color: var(--muted); }
+  .empty-state { color: var(--muted); padding: 1rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+  <h1>CloudOps Guard &mdash; GitLab Audit Report</h1>
+  <p class="subtitle">Read-only audit of project <strong>engineering/checkout-service</strong> (ID <strong>4821</strong>) on <strong>https://gitlab.example.com</strong>, default branch <strong>main</strong></p>
+  <p class="meta">Generated at 2026-03-10T14:00:00+00:00</p>
+
+  <div class="summary">
+    <div class="summary-card critical">
+      <div class="count">0</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="summary-card high">
+      <div class="count">3</div>
+      <div class="label">High</div>
+    </div>
+    <div class="summary-card medium">
+      <div class="count">2</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="summary-card low">
+      <div class="count">1</div>
+      <div class="label">Low</div>
+    </div>
+  </div>
+
+  
+    
+      
+      
+    
+      
+      
+      <section class="severity-section">
+        <span class="severity-heading high">high (3)</span>
+        
+        <article class="finding high">
+          <h3>Default branch is not protected</h3>
+          <div class="locator">
+            <span class="check-id">GL-BR-001</span>
+            &middot; ProtectedBranch <strong>main</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Project path: &#39;engineering/checkout-service&#39;. Default branch: &#39;main&#39;. No exact, wildcard, or inherited protected-branch rule matched the default branch.</dd>
+            <dt>Impact</dt>
+            <dd>An unprotected default branch permits force-push, deletion, and unreviewed direct pushes by anyone with push access. The default branch is typically the deployment/release source of truth.</dd>
+            <dt>Recommendation</dt>
+            <dd>Create a protected-branch rule whose name matches the default branch, with push and merge access restricted appropriately.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+        <article class="finding high">
+          <h3>CI job or service container image uses a mutable tag or no tag</h3>
+          <div class="locator">
+            <span class="check-id">GL-CI-001</span>
+            &middot; CIJob <strong>registry.example.com/checkout/build:latest</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            &middot; job <strong>build</strong>
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>CI job &#39;build&#39; uses image &#39;registry.example.com/checkout/build:latest&#39; (tag: latest).</dd>
+            <dt>Impact</dt>
+            <dd>A mutable tag such as &#39;latest&#39;, or no tag at all, means the exact image content used by this CI job may differ from what ran previously or what will run next time, undermining reproducibility, rollback safety, and supply-chain traceability. CI images also run with pipeline (and potentially CI job token) permissions, so an unverifiable image is a sharper risk here than an equivalent finding on an idle workload. A specific version tag is a meaningful improvement over &#39;latest&#39;, but a tag can still be overwritten and re-pushed in the registry -- it is not itself a guarantee of immutability.</dd>
+            <dt>Recommendation</dt>
+            <dd>Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+        <article class="finding high">
+          <h3>CI job or service container image uses a mutable tag or no tag</h3>
+          <div class="locator">
+            <span class="check-id">GL-CI-001</span>
+            &middot; CIService <strong>dynamic image reference</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            &middot; job <strong>build</strong>
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>The CI image reference is dynamic and could not be statically verified.</dd>
+            <dt>Impact</dt>
+            <dd>A dynamic, runtime-resolved image reference cannot be evaluated from the CI configuration alone, so its reproducibility, rollback safety, and supply-chain traceability cannot be verified. This does not mean the effective image is necessarily unpinned -- only that CloudOps Guard cannot determine that statically.</dd>
+            <dt>Recommendation</dt>
+            <dd>Replace or constrain the CI/CD variable expression so the effective image reference can be statically verified, rather than relying on a value resolved only at runtime.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+      </section>
+      
+    
+      
+      
+      <section class="severity-section">
+        <span class="severity-heading medium">medium (2)</span>
+        
+        <article class="finding medium">
+          <h3>Successful pipelines are not required before merge</h3>
+          <div class="locator">
+            <span class="check-id">GL-MR-001</span>
+            &middot; Project <strong>engineering/checkout-service</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>The &#39;Pipelines must succeed&#39; setting (only_allow_merge_if_pipeline_succeeds) is disabled.</dd>
+            <dt>Impact</dt>
+            <dd>Merge requests can be merged even when a pipeline fails, so any configured tests, builds, or security scans cannot reliably gate merges while this setting is disabled.</dd>
+            <dt>Recommendation</dt>
+            <dd>Enable &#39;Pipelines must succeed&#39; in the project&#39;s merge request settings.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+        <article class="finding medium">
+          <h3>Project job timeout exceeds a configurable threshold</h3>
+          <div class="locator">
+            <span class="check-id">GL-REL-001</span>
+            &middot; Project <strong>engineering/checkout-service</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Configured project job timeout: 7200 seconds (120 minutes). Configured audit threshold: 3600 seconds (60 minutes).</dd>
+            <dt>Impact</dt>
+            <dd>An excessively long job timeout lets a hung job occupy a runner slot for longer, delaying feedback and potentially increasing compute cost.</dd>
+            <dt>Recommendation</dt>
+            <dd>Lower the project&#39;s default job timeout to a value appropriate for normal jobs, and use job-level timeout overrides only for legitimately long-running work. Projects with intentionally long builds may choose a higher threshold.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+      </section>
+      
+    
+      
+      
+      <section class="severity-section">
+        <span class="severity-heading low">low (1)</span>
+        
+        <article class="finding low">
+          <h3>Redundant pipelines are not automatically cancelled</h3>
+          <div class="locator">
+            <span class="check-id">GL-COST-001</span>
+            &middot; Project <strong>engineering/checkout-service</strong>
+            &middot; project <strong>engineering/checkout-service</strong>
+            
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>Automatic cancellation of redundant pending pipelines (auto_cancel_pending_pipelines) is &#39;disabled&#39;.</dd>
+            <dt>Impact</dt>
+            <dd>With automatic cancellation disabled, superseded pending pipelines may continue consuming runner capacity rather than being cancelled in favor of a newer run. Interruptible running pipelines may also continue consuming runner capacity and compute time instead of being stopped when superseded.</dd>
+            <dt>Recommendation</dt>
+            <dd>Enable automatic cancellation of redundant, pending pipelines, unless the project intentionally requires every pipeline to run to completion for compliance or audit-history purposes.</dd>
+            <dt>Auto-remediable</dt>
+            <dd>No</dd>
+          </dl>
+        </article>
+        
+      </section>
+      
+    
+  
+
+  <footer>
+    CloudOps Guard performs a read-only audit of this GitLab project. It never modifies
+    the project, and never reports credentials, tokens, raw or merged CI configuration,
+    scripts, variable values, job logs, traces or artifacts.
+  </footer>
+</body>
+</html>

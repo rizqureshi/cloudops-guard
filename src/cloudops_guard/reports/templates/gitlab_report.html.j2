@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CloudOps Guard - GitLab Audit Report</title>
+<style>
+  :root {
+    --critical: #b91c1c;
+    --high: #c2410c;
+    --medium: #a16207;
+    --low: #1d4ed8;
+    --bg: #ffffff;
+    --fg: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --panel: #f9fafb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  h1 { margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 2rem; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .summary {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 2rem;
+  }
+  .summary-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    min-width: 120px;
+    background: var(--panel);
+  }
+  .summary-card .count { font-size: 2rem; font-weight: 700; }
+  .summary-card .label { color: var(--muted); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+  .summary-card.critical .count { color: var(--critical); }
+  .summary-card.high .count { color: var(--high); }
+  .summary-card.medium .count { color: var(--medium); }
+  .summary-card.low .count { color: var(--low); }
+  .severity-section { margin-bottom: 2.5rem; }
+  .severity-heading {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .severity-heading.critical { background: var(--critical); }
+  .severity-heading.high { background: var(--high); }
+  .severity-heading.medium { background: var(--medium); }
+  .severity-heading.low { background: var(--low); }
+  .finding {
+    border: 1px solid var(--border);
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1rem;
+    background: var(--panel);
+  }
+  .finding.critical { border-left-color: var(--critical); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.medium { border-left-color: var(--medium); }
+  .finding.low { border-left-color: var(--low); }
+  .finding h3 { margin: 0 0 0.25rem; }
+  .finding .locator { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  .finding dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
+  .finding dt { color: var(--muted); font-size: 0.85rem; }
+  .finding dd { margin: 0; }
+  .check-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; color: var(--muted); }
+  .empty-state { color: var(--muted); padding: 1rem 0; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+  <h1>CloudOps Guard &mdash; GitLab Audit Report</h1>
+  <p class="subtitle">Read-only audit of project <strong>{{ report.project_path }}</strong> (ID <strong>{{ report.project_id }}</strong>) on <strong>{{ report.gitlab_url }}</strong>, default branch <strong>{{ report.default_branch }}</strong></p>
+  <p class="meta">Generated at {{ report.generated_at.isoformat() }}</p>
+
+  <div class="summary">
+    <div class="summary-card critical">
+      <div class="count">{{ report.summary.critical }}</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="summary-card high">
+      <div class="count">{{ report.summary.high }}</div>
+      <div class="label">High</div>
+    </div>
+    <div class="summary-card medium">
+      <div class="count">{{ report.summary.medium }}</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="summary-card low">
+      <div class="count">{{ report.summary.low }}</div>
+      <div class="label">Low</div>
+    </div>
+  </div>
+
+  {% if report.findings %}
+    {% for severity in severity_order %}
+      {% set findings = findings_by_severity[severity] %}
+      {% if findings %}
+      <section class="severity-section">
+        <span class="severity-heading {{ severity }}">{{ severity }} ({{ findings|length }})</span>
+        {% for finding in findings %}
+        <article class="finding {{ severity }}">
+          <h3>{{ finding.title }}</h3>
+          <div class="locator">
+            <span class="check-id">{{ finding.check_id }}</span>
+            &middot; {{ finding.resource_kind.value }} <strong>{{ finding.resource_name }}</strong>
+            &middot; project <strong>{{ finding.project_path }}</strong>
+            {% if finding.job_name %}&middot; job <strong>{{ finding.job_name }}</strong>{% endif %}
+          </div>
+          <dl>
+            <dt>Evidence</dt>
+            <dd>{{ finding.evidence }}</dd>
+            <dt>Impact</dt>
+            <dd>{{ finding.impact }}</dd>
+            <dt>Recommendation</dt>
+            <dd>{{ finding.recommendation }}</dd>
+            <dt>Auto-remediable</dt>
+            <dd>{{ "Yes" if finding.auto_remediable else "No" }}</dd>
+          </dl>
+        </article>
+        {% endfor %}
+      </section>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="empty-state">No findings for this audit run.</p>
+  {% endif %}
+
+  <footer>
+    CloudOps Guard performs a read-only audit of this GitLab project. It never modifies
+    the project, and never reports credentials, tokens, raw or merged CI configuration,
+    scripts, variable values, job logs, traces or artifacts.
+  </footer>
+</body>
+</html>
