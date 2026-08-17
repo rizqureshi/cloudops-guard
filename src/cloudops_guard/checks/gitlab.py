@@ -22,8 +22,12 @@ argument beyond the normalized snapshot). Phase 2C-E2 adds `GL-CI-001`
 `GitLabCiConfigSnapshot` produced by
 `GitLabCollector.collect_ci_config_snapshot` rather than
 `GitLabProjectSnapshot` -- kept on its own entry point for that reason.
-There is still no combined all-GitLab evaluator or report/CLI integration
--- see `docs/milestones/v0.2.0-gitlab-audit.md`.
+Phase 2D-A adds a combined evaluator, `evaluate_gitlab`, that runs all four
+entry points above and builds a `GitLabAuditReport` -- it lives in
+`src/cloudops_guard/engine/evaluator.py`, not in this module, and delegates
+to these public entry points rather than duplicating any check's condition
+or finding wording. JSON/HTML report-file rendering and CLI integration are
+still not implemented -- see `docs/milestones/v0.2.0-gitlab-audit.md`.
 """
 
 from __future__ import annotations
