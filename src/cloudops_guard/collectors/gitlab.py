@@ -42,13 +42,18 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
+import pydantic
 import urllib3
 import urllib3.exceptions
+import yaml
 
 from cloudops_guard.models import (
+    GitLabCiConfigSnapshot,
+    GitLabCiImageReference,
     GitLabProjectSettings,
     GitLabProjectSnapshot,
     GitLabProtectedBranchRule,
+    GitLabResourceKind,
 )
 
 GITLAB_TOKEN_ENV_VAR = "CLOUDOPS_GUARD_GITLAB_TOKEN"
@@ -853,6 +858,439 @@ def _normalize_protected_branch(payload: object) -> GitLabProtectedBranchRule:
     )
 
 
+# --- Phase 2C-E2: CI Lint collection and narrow image/service normalization -----
+#
+# A separate collection concern from the Phase 2B collector above: issued
+# via `GitLabCollector.collect_ci_config_snapshot`, a distinct entry point
+# from `collect_project_snapshot`, using exactly one additional GET request
+# (`/projects/:id/ci/lint`). Never calls `include_jobs=true`, a CI/CD
+# variables endpoint, or a pipeline/job/trace/artifact/repository-file
+# endpoint. Follows the Phase 2C-E1 investigation's proven, bounded
+# normalization algorithm -- narrowly resolving only effective job/service
+# image inheritance (job override > `inherit:` selection > `default:` /
+# legacy top-level `image`/`services`) -- and is deliberately not a general
+# GitLab CI compiler. GitLab resolves `include:`, `extends:` (including
+# chained/multi-parent), and `!reference` server-side before producing
+# `merged_yaml`, and this module never reprocesses any of those three
+# constructs. `merged_yaml` is *not*, however, a fully evaluated pipeline:
+# GitLab's CI Lint does not resolve CI/CD variable values or evaluate
+# `rules:`/`workflow:` conditions -- a variable reference such as `$TAG`
+# still appears literally in `merged_yaml` exactly as authored. This module
+# never evaluates variables or rules either; an image/service value
+# containing an unresolved variable reference is converted to a generic
+# dynamic/unverifiable marker (see `_DYNAMIC_REFERENCE_RE` below) rather than
+# resolved, guessed at, or treated as static. Any relevant structure this
+# algorithm does not recognize is treated as a normalization failure -- not
+# silently skipped -- per the same "fail the audit rather than under-report"
+# principle as the rest of this module.
+
+_CI_LINT_GITLAB_URL_MISMATCH_MESSAGE = (
+    "GitLab CI Lint collection failed: the project snapshot's GitLab URL does not "
+    "match this client's configured instance."
+)
+_CI_LINT_INVALID_CONFIG_MESSAGE = "GitLab CI Lint reported the CI configuration as invalid."
+_CI_LINT_MISSING_MERGED_YAML_MESSAGE = (
+    "GitLab CI Lint response is missing a non-empty 'merged_yaml' string."
+)
+_CI_LINT_MALFORMED_YAML_MESSAGE = "GitLab CI Lint merged YAML could not be parsed."
+_CI_LINT_UNSUPPORTED_YAML_ROOT_MESSAGE = "GitLab CI Lint merged YAML root was not a mapping."
+_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE = (
+    "GitLab CI Lint merged YAML has an unexpected or unsupported structure."
+)
+_CI_LINT_OVERSIZED_YAML_MESSAGE = "GitLab CI Lint merged YAML exceeds the supported size limit."
+
+# A defensive, client-side cap on `yaml.safe_load` parsing cost, independent
+# of any limit GitLab itself enforces server-side. Real .gitlab-ci.yml files
+# are almost never anywhere near this size; 1,000,000 characters is a very
+# generous margin, not a realistic ceiling.
+_MAX_MERGED_YAML_CHARACTERS = 1_000_000
+
+# Matches GitLab CI/CD variable-reference syntax ($VAR or ${VAR}, standard
+# variable-name characters only). Deliberately permissive rather than a
+# strict validator of well-formed syntax: treating a borderline construct
+# as dynamic/unverifiable is the safe direction here -- it still produces a
+# (differently-worded) finding rather than silently passing a reference
+# that in fact varies at runtime.
+_DYNAMIC_REFERENCE_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
+
+# Global `.gitlab-ci.yml` keywords -- never job or bridge entries, and
+# always skipped when iterating merged_yaml's top-level keys for runnable
+# jobs.
+_CI_LINT_ROOT_RESERVED_KEYS = frozenset(
+    {
+        "default",
+        "include",
+        "image",
+        "services",
+        "before_script",
+        "after_script",
+        "variables",
+        "stages",
+        "cache",
+        "workflow",
+    }
+)
+
+
+def _extract_image_or_service_name(entry: object) -> str:
+    """Extract the name from a single image/service value known to be present.
+
+    Accepts a non-empty string, or a mapping with a non-empty string
+    `name` key (the only sub-key this algorithm reads from an image/service
+    mapping -- `entrypoint`, `pull_policy`, `docker`, `kubernetes`,
+    service-level `alias`, `command`, and `variables` are never read).
+    Anything else is a structurally unexpected image/service value and
+    raises rather than being silently treated as "no image".
+    """
+    if isinstance(entry, str) and entry:
+        return entry
+    if isinstance(entry, dict):
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            return name
+    raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+
+
+def _extract_optional_image(value: object) -> str | None:
+    """Extract an `image:` value that may be entirely absent (`None`)."""
+    if value is None:
+        return None
+    return _extract_image_or_service_name(value)
+
+
+def _extract_services_list(value: object) -> list[str]:
+    """Extract a `services:` value known to be present (caller checked `in`).
+
+    An empty list is valid and yields an empty list of names -- this is
+    exactly what allows `services: []` to mean "explicitly no services" and
+    be distinguished, by the caller, from an absent `services:` key.
+    """
+    if not isinstance(value, list):
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+    return [_extract_image_or_service_name(item) for item in value]
+
+
+# GitLab's documented `default:` keywords -- the exact, closed set
+# `inherit:default:[...]` may selectively list (GitLab CI/CD YAML
+# reference, "default"/"inherit:default"). A `valid: true` CI Lint result
+# should never contain any other value in this list; if one appears
+# anyway, that is treated as a nonconforming response, not a legitimate
+# GitLab construct this algorithm doesn't yet know about.
+_ALLOWED_DEFAULT_INHERIT_KEYWORDS = frozenset(
+    {
+        "after_script",
+        "artifacts",
+        "before_script",
+        "cache",
+        "hooks",
+        "id_tokens",
+        "image",
+        "interruptible",
+        "retry",
+        "services",
+        "tags",
+        "timeout",
+    }
+)
+
+
+def _validate_inherit_default_list(values: object) -> None:
+    """Validate an `inherit:default:[...]` list structurally and by keyword.
+
+    Every member must be a plain string (not a `bool` -- `bool` is an
+    `int` subclass but is never a valid list member here -- and not an
+    `int`, `None`, mapping, or nested list) drawn from GitLab's documented,
+    closed `default:` keyword set. Neither the list nor a rejected member
+    is reproduced in the raised error.
+    """
+    if not isinstance(values, list):
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, str):
+            raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+        if value not in _ALLOWED_DEFAULT_INHERIT_KEYWORDS:
+            raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+
+
+def _job_inherits_default_key(job_config: Mapping[str, Any], key: str) -> bool:
+    """True if `job_config` inherits `default:<key>` (image or services).
+
+    An absent `inherit:` key, or an absent `inherit:default` sub-key,
+    means "inherit" (GitLab's default). `inherit:default: true|false` is a
+    blanket switch; `inherit:default: [key, ...]` selects individual keys
+    -- validated via `_validate_inherit_default_list` before use, so a
+    malformed or nonconforming list fails closed rather than being
+    partially trusted (e.g. `key in default_inherit` silently evaluating
+    `False` against a list containing the wrong types).
+    """
+    if "inherit" not in job_config:
+        return True
+    inherit = job_config["inherit"]
+    if not isinstance(inherit, dict):
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+    if "default" not in inherit:
+        return True
+    default_inherit = inherit["default"]
+    if isinstance(default_inherit, bool):
+        return default_inherit
+    if isinstance(default_inherit, list):
+        _validate_inherit_default_list(default_inherit)
+        return key in default_inherit
+    raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+
+
+def _resolve_project_default_image(
+    config: Mapping[str, Any], default_block: Mapping[str, Any]
+) -> str | None:
+    if "image" in default_block:
+        return _extract_optional_image(default_block["image"])
+    if "image" in config:  # deprecated legacy top-level key
+        return _extract_optional_image(config["image"])
+    return None
+
+
+def _resolve_project_default_services(
+    config: Mapping[str, Any], default_block: Mapping[str, Any]
+) -> list[str]:
+    if "services" in default_block:
+        return _extract_services_list(default_block["services"])
+    if "services" in config:  # deprecated legacy top-level key
+        return _extract_services_list(config["services"])
+    return []
+
+
+def _resolve_job_image(
+    job_config: Mapping[str, Any], project_default_image: str | None
+) -> str | None:
+    if "image" in job_config:  # a job's own image always wins outright
+        return _extract_optional_image(job_config["image"])
+    if _job_inherits_default_key(job_config, "image"):
+        return project_default_image
+    return None
+
+
+def _resolve_job_services(
+    job_config: Mapping[str, Any], project_default_services: list[str]
+) -> list[str]:
+    if "services" in job_config:  # includes `services: []`, an explicit override
+        return _extract_services_list(job_config["services"])
+    if _job_inherits_default_key(job_config, "services"):
+        return project_default_services
+    return []
+
+
+def _is_ci_job_entry(config: object) -> bool:
+    return isinstance(config, dict) and ("script" in config or "run" in config)
+
+
+def _is_ci_trigger_bridge_entry(config: object) -> bool:
+    # A trigger bridge never resolves an image or services -- it triggers
+    # a downstream pipeline rather than running in a container. GitLab's
+    # own `Entry::Bridge` validates the `trigger:` value itself; a
+    # malformed `trigger:` would already make the overall response
+    # `valid: false`, which is rejected before normalization ever reaches
+    # this function -- so `trigger:` presence alone is sufficient here.
+    return (
+        isinstance(config, dict)
+        and "trigger" in config
+        and "script" not in config
+        and "run" not in config
+    )
+
+
+def _is_ci_needs_only_entry(config: object) -> bool:
+    # An entry shaped like a bridge candidate via `needs:` alone (no
+    # `trigger:`, `script:`, or `run:`) -- callers must still validate its
+    # `needs:` shape with `_is_valid_needs_pipeline_bridge` before treating
+    # it as an ignorable bridge; this function only identifies the
+    # candidate shape.
+    return (
+        isinstance(config, dict)
+        and "needs" in config
+        and "trigger" not in config
+        and "script" not in config
+        and "run" not in config
+    )
+
+
+def _is_valid_needs_pipeline_bridge_entry(entry: object) -> bool:
+    """True for a single, source-proven `needs:pipeline` bridge entry.
+
+    Source-proven from GitLab EE's `Entry::Need` prepend
+    (`ee/lib/ee/gitlab/ci/config/entry/need.rb`, `BridgeHash` strategy --
+    confirmed identical on `18-4-stable-ee` and current master; this is an
+    EE-only strategy, consistent with this milestone's EE-only supported
+    scope). `bridge_to_upstream_pipeline?` there routes a `Hash` entry to
+    the bridge strategy only when it has neither a `job` nor a `project`
+    key; `BridgeHash` then restricts the entry to *exactly* the single key
+    `pipeline`, with a non-empty string value -- GitLab validates only
+    `pipeline`'s type, never its content, so a CI/CD variable reference
+    such as `$UPSTREAM_PROJECT` is itself a valid non-empty string and is
+    accepted here, without being retained or reproduced by this algorithm
+    either way. An entry with a `job` or `project` key, any key besides
+    `pipeline`, an empty mapping, or an empty/non-string `pipeline` value
+    all return `False`.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if set(entry.keys()) != {"pipeline"}:
+        return False
+    pipeline = entry["pipeline"]
+    return isinstance(pipeline, str) and bool(pipeline)
+
+
+def _is_valid_needs_pipeline_bridge(needs: object) -> bool:
+    """True only for the source-proven `needs:pipeline` bridge shape.
+
+    GitLab's `Entry::Needs` (`ComposableArray#compose!`) wraps a bare
+    `Hash` `needs:` value into a one-element array (`[@config].flatten`,
+    which does not recurse into a `Hash`) before per-item classification
+    -- so `needs: {pipeline: <value>}` and `needs: [{pipeline: <value>}]`
+    reach GitLab's per-entry validation identically, and both are accepted
+    here. `Entry::Bridge` additionally requires *exactly one* bridge-shaped
+    need. This narrow check recognizes only those two proven shapes,
+    delegating the entry-level shape/value validation to
+    `_is_valid_needs_pipeline_bridge_entry`: an empty list, multiple-entry
+    list, scalar, plain job-name string, or a mapping/list-entry that
+    fails that entry-level check all return `False` and must fail closed
+    at the call site rather than being silently treated as an ignorable
+    bridge.
+    """
+    if isinstance(needs, dict):
+        return _is_valid_needs_pipeline_bridge_entry(needs)
+    if isinstance(needs, list) and len(needs) == 1:
+        return _is_valid_needs_pipeline_bridge_entry(needs[0])
+    return False
+
+
+def _build_ci_image_reference(
+    job_name: str, resource_kind: GitLabResourceKind, image: str
+) -> GitLabCiImageReference:
+    if _DYNAMIC_REFERENCE_RE.search(image):
+        return GitLabCiImageReference(
+            job_name=job_name, resource_kind=resource_kind, image=None, dynamic=True
+        )
+    return GitLabCiImageReference(
+        job_name=job_name, resource_kind=resource_kind, image=image, dynamic=False
+    )
+
+
+def _normalize_ci_images(config: Mapping[str, Any]) -> list[GitLabCiImageReference]:
+    """Resolve effective job/service images from an already-merged CI config.
+
+    Iterates only the top-level keys of `config` (GitLab's `merged_yaml`,
+    parsed): reserved global keywords and hidden/template entries (name
+    starts with `.`) are skipped, trigger bridges never resolve an image,
+    and a needs-only entry is skipped only when its `needs:` shape is the
+    source-proven `needs:pipeline` bridge form (see
+    `_is_valid_needs_pipeline_bridge`) -- any other needs-only shape
+    (`needs: []`, job-only needs, a scalar, or another malformed shape)
+    fails closed rather than being silently treated as an ignorable
+    bridge. Every other entry must already look like a runnable job
+    (`script:` or `run:` present) -- since `config` came from a `valid:
+    true` CI Lint result, an entry matching none of these would indicate a
+    normalization gap, not a legitimate CI construct, so it raises rather
+    than being silently ignored. `parallel:` job definitions need no special
+    handling: GitLab's merged_yaml still represents them as a single job
+    entry with a `parallel:` key this algorithm never reads.
+    """
+    default_value = config.get("default")
+    if default_value is not None and not isinstance(default_value, dict):
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+    default_block: Mapping[str, Any] = default_value or {}
+
+    project_default_image = _resolve_project_default_image(config, default_block)
+    project_default_services = _resolve_project_default_services(config, default_block)
+
+    images: list[GitLabCiImageReference] = []
+    for name, job_config in config.items():
+        if not isinstance(name, str):
+            raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+        if name in _CI_LINT_ROOT_RESERVED_KEYS:
+            continue
+        if name.startswith("."):
+            continue  # hidden/template entry -- never runnable
+        if _is_ci_trigger_bridge_entry(job_config):
+            continue
+        if _is_ci_needs_only_entry(job_config):
+            if not _is_valid_needs_pipeline_bridge(job_config["needs"]):
+                raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+            continue
+        if not _is_ci_job_entry(job_config):
+            raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE)
+
+        job_image = _resolve_job_image(job_config, project_default_image)
+        if job_image is not None:
+            images.append(_build_ci_image_reference(name, GitLabResourceKind.CI_JOB, job_image))
+
+        for service_image in _resolve_job_services(job_config, project_default_services):
+            images.append(
+                _build_ci_image_reference(name, GitLabResourceKind.CI_SERVICE, service_image)
+            )
+
+    return images
+
+
+def _normalize_ci_lint_response(
+    payload: object, *, project_path: str, collected_at: dt.datetime
+) -> GitLabCiConfigSnapshot:
+    """Validate and normalize a `GET /projects/:id/ci/lint` response.
+
+    Requires a real boolean `valid`; a `False` value raises a fixed,
+    sanitized error without inspecting or reproducing GitLab's `errors` or
+    `warnings` -- this covers every invalid-configuration case GitLab
+    reports through `valid`, including a legacy-top-level-vs-`default:`
+    conflict, with no special-cased handling or repair attempt for that or
+    any other specific conflict. Requires a non-empty `merged_yaml` string
+    when valid, parsed only via `yaml.safe_load`; a parse exception is
+    replaced with a fixed, sanitized error, never reproducing the parser's
+    own exception text (which can quote the offending YAML). `payload` and
+    the decoded `merged_yaml` string are never stored, logged, or included
+    in an exception, and go out of scope when this function returns or
+    raises. Never reads `jobs`, `errors`, `warnings`, or `includes`.
+
+    A `valid: true` result from a conforming GitLab instance never
+    produces merged YAML this narrow algorithm cannot model -- but a
+    malformed or nonconforming response could, and any resulting Pydantic
+    `ValidationError` (e.g. an empty job name, itself a valid YAML mapping
+    key but rejected by `GitLabCiImageReference`'s `min_length=1`) is
+    caught here and replaced with the same fixed, sanitized structure
+    error used elsewhere in this function -- it never escapes with
+    Pydantic's own `input_value`/field/message detail, which could quote
+    untrusted merged-YAML content.
+    """
+    if not isinstance(payload, dict):
+        raise GitLabClientError("GitLab CI Lint response was not a JSON object.")
+
+    valid = payload.get("valid")
+    if not isinstance(valid, bool):
+        raise GitLabClientError("GitLab CI Lint response is missing a boolean 'valid' field.")
+    if not valid:
+        raise GitLabClientError(_CI_LINT_INVALID_CONFIG_MESSAGE)
+
+    merged_yaml = payload.get("merged_yaml")
+    if not isinstance(merged_yaml, str) or not merged_yaml:
+        raise GitLabClientError(_CI_LINT_MISSING_MERGED_YAML_MESSAGE)
+    if len(merged_yaml) > _MAX_MERGED_YAML_CHARACTERS:
+        raise GitLabClientError(_CI_LINT_OVERSIZED_YAML_MESSAGE)
+
+    try:
+        config = yaml.safe_load(merged_yaml)
+    except yaml.YAMLError:
+        raise GitLabClientError(_CI_LINT_MALFORMED_YAML_MESSAGE) from None
+
+    if not isinstance(config, dict):
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_YAML_ROOT_MESSAGE)
+
+    try:
+        images = _normalize_ci_images(config)
+        return GitLabCiConfigSnapshot(
+            project_path=project_path, collected_at=collected_at, images=images
+        )
+    except pydantic.ValidationError:
+        raise GitLabClientError(_CI_LINT_UNSUPPORTED_STRUCTURE_MESSAGE) from None
+
+
 class GitLabCollector:
     """Collects a normalized, read-only `GitLabProjectSnapshot` for one project.
 
@@ -862,6 +1300,15 @@ class GitLabCollector:
     variables, runner-management, pipeline/job, log/trace/artifact,
     repository-file, or member/user/group/token endpoints, and never issues
     a non-GET request. Implements no check, CLI command, or report.
+
+    `collect_ci_config_snapshot` (Phase 2C-E2) is a separate, additional
+    entry point on this same class for the one CI Lint GET this milestone
+    needs -- kept distinct from `collect_project_snapshot` above rather
+    than folded into it, since it is a different collection concern with
+    its own request and normalization algorithm. It takes the
+    `GitLabProjectSnapshot` already produced by `collect_project_snapshot`
+    (rather than a separately caller-supplied project/path/branch), so its
+    project identity cannot drift from what was actually collected.
     """
 
     def __init__(self, client: GitLabClient) -> None:
@@ -923,4 +1370,77 @@ class GitLabCollector:
             collected_at=when,
             project=project_settings,
             protected_branches=protected_branches,
+        )
+
+    def collect_ci_config_snapshot(
+        self,
+        project_snapshot: GitLabProjectSnapshot,
+        *,
+        collected_at: dt.datetime | None = None,
+    ) -> GitLabCiConfigSnapshot:
+        """Collect and return the normalized CI Lint image snapshot for `project_snapshot`.
+
+        A separate entry point from `collect_project_snapshot`, issuing
+        exactly one additional GET: `GET /projects/:id/ci/lint`, with
+        `content_ref=<default_branch>`, `dry_run=false`, and
+        `include_jobs=false`. The numeric project ID, project path, and
+        default branch used for that request are derived exclusively from
+        `project_snapshot` -- typically produced by a prior
+        `collect_project_snapshot()` call on this same client -- rather
+        than accepted as independent caller-supplied values, so a caller
+        cannot substitute a different project path or branch than the one
+        `project_snapshot` was actually collected against. Query
+        parameters are built with `urlencode`, never string concatenation,
+        so a branch name containing a reserved URL character is always
+        safely encoded.
+
+        Before issuing any request, requires
+        `project_snapshot.gitlab_url == self._client.instance_base_url`; a
+        mismatch raises a fixed, sanitized `GitLabClientError` -- neither
+        URL value is reproduced in the message -- and no HTTP request is
+        made. This guards against evaluating a project snapshot collected
+        from one GitLab instance against a client configured for a
+        different one.
+
+        Every CI Lint failure, including a 404, is a sanitized collection
+        failure in this phase: a 404 can mean the project has no
+        `.gitlab-ci.yml`, but can equally mean an access or routing
+        problem, and this phase does not inspect or reproduce a 404
+        response body to distinguish those cases -- it never reinterprets a
+        404 as "no CI configuration" and reports a clean audit for it. This
+        matches the existing generic `_raise_for_status` handling for every
+        other status code; no CI-Lint-specific status handling is added
+        here.
+
+        Never calls `include_jobs=true`, a CI/CD variables endpoint, or a
+        pipeline/job/trace/artifact/repository-file endpoint, and never
+        issues another metadata/project/protected-branches request --
+        `project_snapshot` is read only here, never re-fetched. Like
+        `collect_project_snapshot`, the raw CI Lint response and the
+        decoded `merged_yaml` string are never bound to a named local
+        variable in this method -- the `get_json_object` call is nested
+        directly inside the normalization call, so both are reachable only
+        for the duration of that single call and are eligible for garbage
+        collection immediately afterward. This is a realistic
+        normalize-then-discard guarantee, not a claim that Python can
+        securely zeroize an immutable string's underlying memory.
+        """
+        if project_snapshot.gitlab_url != self._client.instance_base_url:
+            raise GitLabClientError(_CI_LINT_GITLAB_URL_MISMATCH_MESSAGE)
+
+        when = collected_at if collected_at is not None else dt.datetime.now(dt.UTC)
+        canonical_id = canonicalize_gitlab_project(project_snapshot.project.project_id)
+        query = urlencode(
+            {
+                "content_ref": project_snapshot.project.default_branch,
+                "dry_run": "false",
+                "include_jobs": "false",
+            }
+        )
+        return _normalize_ci_lint_response(
+            self._client.get_json_object(
+                "Get CI Lint result", f"/projects/{canonical_id}/ci/lint?{query}"
+            ),
+            project_path=project_snapshot.project.project_path,
+            collected_at=when,
         )

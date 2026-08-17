@@ -20,7 +20,15 @@ import datetime as dt
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, Field, StrictBool, StrictInt, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 class Severity(StrEnum):
@@ -280,7 +288,9 @@ class GitLabProjectSnapshot(BaseModel):
     Deliberately has no raw-response or catch-all metadata field: only the
     normalized `project` and `protected_branches` models below, plus
     instance-identity fields. CI configuration (`GL-CI-001`) normalization
-    is a separate, later task and has no representation here yet.
+    remains a separate concern, deliberately not folded in here -- it is
+    represented by the standalone `GitLabCiConfigSnapshot` model below,
+    collected via `GitLabCollector.collect_ci_config_snapshot`.
     """
 
     gitlab_url: str = Field(min_length=1)
@@ -297,6 +307,75 @@ class GitLabProjectSnapshot(BaseModel):
         # subclass can be attached yet still return `None` from
         # `utcoffset()`, which Python's own datetime docs describe as
         # behaving like a naive datetime for arithmetic/comparison purposes.
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("collected_at must be timezone-aware.")
+        return value
+
+
+# --- GitLab CI Lint normalized image models (v0.2.0 Phase 2C-E2) -------------
+#
+# Deliberately kept separate from `GitLabProjectSnapshot` above rather than
+# nested inside it: CI Lint is its own collection request
+# (`GET /projects/:id/ci/lint`), not part of the `/projects/:id` snapshot,
+# and the Phase 2C-E1 investigation recommended keeping the two concerns
+# apart. These models retain only what `GL-CI-001` needs -- project path,
+# job name, resource kind, and either a static image reference or a
+# dynamic/unverifiable marker -- and never the raw CI Lint response, merged
+# YAML, scripts, variables, warnings, errors, or includes. See
+# `docs/milestones/v0.2.0-gitlab-audit.md`, "GL-CI-001".
+
+
+class GitLabCiImageReference(BaseModel):
+    """One resolved CI job or service container image reference.
+
+    A static reference (`dynamic=False`) always carries a non-empty `image`
+    string. A dynamic, runtime-resolved reference (`dynamic=True`, detected
+    from a `$VAR`/`${VAR}`-style expression in the source value) always
+    carries `image=None` instead -- the original expression and image
+    string are never retained on a dynamic reference, so a job/service
+    pinned via a runtime-interpolated value can never leak into a model,
+    finding, or exception. This static-or-dynamic split is enforced below
+    (mutually exclusive), not left to callers to maintain by convention.
+    """
+
+    job_name: str = Field(min_length=1)
+    resource_kind: GitLabResourceKind
+    image: str | None = Field(default=None, min_length=1)
+    dynamic: StrictBool
+
+    @field_validator("resource_kind")
+    @classmethod
+    def _resource_kind_must_be_ci(cls, value: GitLabResourceKind) -> GitLabResourceKind:
+        if value not in (GitLabResourceKind.CI_JOB, GitLabResourceKind.CI_SERVICE):
+            raise ValueError("resource_kind must be CI_JOB or CI_SERVICE.")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_dynamic_image_invariant(self) -> GitLabCiImageReference:
+        if self.dynamic and self.image is not None:
+            raise ValueError("A dynamic image reference must not retain an image string.")
+        if not self.dynamic and self.image is None:
+            raise ValueError("A static image reference must retain a non-empty image string.")
+        return self
+
+
+class GitLabCiConfigSnapshot(BaseModel):
+    """Normalized CI Lint result for a single project.
+
+    Collected via a separate entry point
+    (`GitLabCollector.collect_ci_config_snapshot`) from the one that builds
+    `GitLabProjectSnapshot`. Deliberately has no raw-response, merged-YAML,
+    script, variable, warning, error, or include field: only the project
+    path, collection time, and the resolved image references below.
+    """
+
+    project_path: str = Field(min_length=1)
+    collected_at: dt.datetime
+    images: list[GitLabCiImageReference] = Field(default_factory=list)
+
+    @field_validator("collected_at")
+    @classmethod
+    def _collected_at_must_be_timezone_aware(cls, value: dt.datetime) -> dt.datetime:
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("collected_at must be timezone-aware.")
         return value

@@ -17,10 +17,13 @@ also kept as its own separate entry point -- it requires a caller-supplied
 `job_timeout_threshold_seconds` with no product-level default yet, so it is
 not folded into `evaluate_project_setting_checks` either. Phase 2C-D2 adds
 `GL-COST-002` into `evaluate_project_setting_checks` (it needs no additional
-argument beyond the normalized snapshot). There is still no combined
-all-GitLab evaluator. `GL-CI-001` image inspection, evaluator/report
-integration, and CLI wiring remain separate, later work -- see
-`docs/milestones/v0.2.0-gitlab-audit.md`.
+argument beyond the normalized snapshot). Phase 2C-E2 adds `GL-CI-001`
+(entry point `evaluate_ci_image_check`), operating on the separate
+`GitLabCiConfigSnapshot` produced by
+`GitLabCollector.collect_ci_config_snapshot` rather than
+`GitLabProjectSnapshot` -- kept on its own entry point for that reason.
+There is still no combined all-GitLab evaluator or report/CLI integration
+-- see `docs/milestones/v0.2.0-gitlab-audit.md`.
 """
 
 from __future__ import annotations
@@ -28,7 +31,10 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+from cloudops_guard.checks.kubernetes import _MUTABLE_TAGS, _image_tag, _is_pinned_by_digest
 from cloudops_guard.models import (
+    GitLabCiConfigSnapshot,
+    GitLabCiImageReference,
     GitLabFinding,
     GitLabProjectSnapshot,
     GitLabProtectedBranchRule,
@@ -46,6 +52,7 @@ CHECK_DEVELOPER_VARIABLE_OVERRIDE_ALLOWED = "GL-SEC-003"
 CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED = "GL-COST-001"
 CHECK_UNLIMITED_GIT_CLONE_DEPTH = "GL-COST-002"
 CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD = "GL-REL-001"
+CHECK_MUTABLE_CI_IMAGE = "GL-CI-001"
 
 _DEVELOPER_ROLE_LEVEL = 30
 _DEVELOPER_OVERRIDE_ROLE = "developer"
@@ -612,3 +619,166 @@ def evaluate_job_timeout_check(
         "builds may choose a higher threshold.",
         audited_at=audited_at,
     )
+
+
+# --- Phase 2C-E2: CI image pinning check -----------------------------------------
+
+_TITLE_MUTABLE_CI_IMAGE = "CI job or service container image uses a mutable tag or no tag"
+
+_IMPACT_MUTABLE_CI_IMAGE = (
+    "A mutable tag such as 'latest', or no tag at all, means the exact image "
+    "content used by this CI job may differ from what ran previously or what "
+    "will run next time, undermining reproducibility, rollback safety, and "
+    "supply-chain traceability. CI images also run with pipeline (and "
+    "potentially CI job token) permissions, so an unverifiable image is a "
+    "sharper risk here than an equivalent finding on an idle workload. A "
+    "specific version tag is a meaningful improvement over 'latest', but a "
+    "tag can still be overwritten and re-pushed in the registry -- it is not "
+    "itself a guarantee of immutability."
+)
+_RECOMMENDATION_MUTABLE_CI_IMAGE = (
+    "Pin the image to a specific version tag at minimum. For a "
+    "content-addressed, truly immutable reference, pin to a digest instead "
+    "or in addition (e.g. app@sha256:...)."
+)
+
+_DYNAMIC_RESOURCE_NAME = "dynamic image reference"
+_EVIDENCE_DYNAMIC_CI_IMAGE = (
+    "The CI image reference is dynamic and could not be statically verified."
+)
+_IMPACT_DYNAMIC_CI_IMAGE = (
+    "A dynamic, runtime-resolved image reference cannot be evaluated from "
+    "the CI configuration alone, so its reproducibility, rollback safety, "
+    "and supply-chain traceability cannot be verified. This does not mean "
+    "the effective image is necessarily unpinned -- only that CloudOps "
+    "Guard cannot determine that statically."
+)
+_RECOMMENDATION_DYNAMIC_CI_IMAGE = (
+    "Replace or constrain the CI/CD variable expression so the effective "
+    "image reference can be statically verified, rather than relying on a "
+    "value resolved only at runtime."
+)
+
+
+def _build_dynamic_ci_image_finding(
+    project_path: str,
+    image_ref: GitLabCiImageReference,
+    audited_at: dt.datetime,
+) -> GitLabFinding:
+    return GitLabFinding(
+        check_id=CHECK_MUTABLE_CI_IMAGE,
+        title=_TITLE_MUTABLE_CI_IMAGE,
+        severity=Severity.HIGH,
+        project_path=project_path,
+        resource_kind=image_ref.resource_kind,
+        resource_name=_DYNAMIC_RESOURCE_NAME,
+        job_name=image_ref.job_name,
+        evidence=_EVIDENCE_DYNAMIC_CI_IMAGE,
+        impact=_IMPACT_DYNAMIC_CI_IMAGE,
+        recommendation=_RECOMMENDATION_DYNAMIC_CI_IMAGE,
+        auto_remediable=False,
+        audited_at=audited_at,
+    )
+
+
+def _build_static_ci_image_finding(
+    project_path: str,
+    image_ref: GitLabCiImageReference,
+    audited_at: dt.datetime,
+) -> GitLabFinding | None:
+    image = image_ref.image
+    assert image is not None  # enforced by the model's static/dynamic invariant
+
+    if _is_pinned_by_digest(image):
+        return None
+    tag = _image_tag(image)
+    if tag is not None and tag not in _MUTABLE_TAGS:
+        return None
+
+    observed = tag or "(no tag)"
+    if image_ref.resource_kind == GitLabResourceKind.CI_JOB:
+        evidence = f"CI job '{image_ref.job_name}' uses image '{image}' (tag: {observed})."
+    else:
+        evidence = (
+            f"A service used by CI job '{image_ref.job_name}' uses image "
+            f"'{image}' (tag: {observed})."
+        )
+    return GitLabFinding(
+        check_id=CHECK_MUTABLE_CI_IMAGE,
+        title=_TITLE_MUTABLE_CI_IMAGE,
+        severity=Severity.HIGH,
+        project_path=project_path,
+        resource_kind=image_ref.resource_kind,
+        resource_name=image,
+        job_name=image_ref.job_name,
+        evidence=evidence,
+        impact=_IMPACT_MUTABLE_CI_IMAGE,
+        recommendation=_RECOMMENDATION_MUTABLE_CI_IMAGE,
+        auto_remediable=False,
+        audited_at=audited_at,
+    )
+
+
+def _build_ci_image_finding(
+    project_path: str,
+    image_ref: GitLabCiImageReference,
+    audited_at: dt.datetime,
+) -> GitLabFinding | None:
+    if image_ref.dynamic:
+        return _build_dynamic_ci_image_finding(project_path, image_ref, audited_at)
+    return _build_static_ci_image_finding(project_path, image_ref, audited_at)
+
+
+def _validate_ci_check_audited_at(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("audited_at must be timezone-aware.")
+    return value
+
+
+def evaluate_ci_image_check(
+    snapshot: GitLabCiConfigSnapshot,
+    *,
+    audited_at: dt.datetime,
+) -> list[GitLabFinding]:
+    """Evaluate `GL-CI-001` against a normalized `GitLabCiConfigSnapshot`.
+
+    Operates only on `snapshot`, produced solely by
+    `GitLabCollector.collect_ci_config_snapshot` -- never performs HTTP,
+    filesystem, environment-variable, or subprocess access, never accepts
+    a client/collector argument, and never mutates `snapshot`.
+    `audited_at` is a required, caller-supplied timezone-aware value,
+    validated up front and propagated exactly (never `datetime.now()`) --
+    a naive `audited_at` raises `ValueError` before any finding is built.
+
+    Reuses `_image_tag`/`_is_pinned_by_digest` from
+    `cloudops_guard.checks.kubernetes` rather than reimplementing tag/digest
+    parsing: the Docker image-reference grammar those functions parse
+    (`[registry[:port]/]repo[:tag][@digest]`) is universal, not
+    Kubernetes-specific, so GL-CI-001 and K8S-IMG-001 share exactly one
+    source of truth for it, and K8S-IMG-001's released behavior is
+    unaffected (this module only imports from `checks/kubernetes.py`; it
+    never modifies it).
+
+    Detects the same pinning cases as `K8S-IMG-001`: a digest-pinned image
+    passes; an ordinary explicit version tag passes; no tag, `latest`, or a
+    dynamic/unverifiable reference each produce a finding. A dynamic
+    reference (`image_ref.dynamic`) never has its original expression or
+    image string reproduced in the finding -- `resource_name` and
+    `evidence` use fixed, generic wording instead.
+
+    One finding is produced per (job, image-or-service) occurrence in
+    `snapshot.images` -- there is no deduplication by image string, so the
+    same mutable image used by two different jobs produces two findings.
+    Findings are returned in `snapshot.images`' own order, which is itself
+    stable: GitLab's `merged_yaml` job order, with each job's own image
+    finding (if any) preceding its service findings (if any), exactly as
+    normalized by `collect_ci_config_snapshot`.
+    """
+    audited_at = _validate_ci_check_audited_at(audited_at)
+
+    findings: list[GitLabFinding] = []
+    for image_ref in snapshot.images:
+        finding = _build_ci_image_finding(snapshot.project_path, image_ref, audited_at)
+        if finding is not None:
+            findings.append(finding)
+    return findings

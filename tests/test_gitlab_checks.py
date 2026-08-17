@@ -27,15 +27,19 @@ from cloudops_guard.checks.gitlab import (
     CHECK_FORCE_PUSH_ALLOWED,
     CHECK_JOB_TIMEOUT_EXCEEDS_THRESHOLD,
     CHECK_JOB_TOKEN_REPOSITORY_PUSH_ALLOWED,
+    CHECK_MUTABLE_CI_IMAGE,
     CHECK_PIPELINE_SUCCESS_NOT_REQUIRED,
     CHECK_REDUNDANT_PIPELINES_NOT_CANCELLED,
     CHECK_UNLIMITED_GIT_CLONE_DEPTH,
+    evaluate_ci_image_check,
     evaluate_git_clone_depth_check,
     evaluate_job_timeout_check,
     evaluate_project_setting_checks,
     evaluate_protected_branch_checks,
 )
 from cloudops_guard.models import (
+    GitLabCiConfigSnapshot,
+    GitLabCiImageReference,
     GitLabFinding,
     GitLabProjectSettings,
     GitLabProjectSnapshot,
@@ -1764,3 +1768,357 @@ def test_gl_rel_001_evidence_contains_no_job_specific_or_sensitive_data() -> Non
         "observed",
     ):
         assert forbidden not in evidence_lower
+
+
+# ============================================================================
+# Phase 2C-E2: GL-CI-001 (`evaluate_ci_image_check`)
+# ============================================================================
+#
+# Operates on the separate `GitLabCiConfigSnapshot` (not
+# `GitLabProjectSnapshot`) produced by `GitLabCollector.collect_ci_config_
+# snapshot`. Reuses `_image_tag`/`_is_pinned_by_digest` from
+# `checks/kubernetes.py`, so the pinning-classification cases below mirror
+# K8S-IMG-001's own test matrix.
+
+PROJECT_PATH = "group/subgroup/project"
+
+
+def make_ci_image_ref(**overrides: object) -> GitLabCiImageReference:
+    defaults: dict[str, object] = {
+        "job_name": "build",
+        "resource_kind": GitLabResourceKind.CI_JOB,
+        "image": "alpine:3.19",
+        "dynamic": False,
+    }
+    defaults.update(overrides)
+    return GitLabCiImageReference(**defaults)
+
+
+def make_ci_snapshot(
+    images: list[GitLabCiImageReference] | None = None,
+    *,
+    project_path: str = PROJECT_PATH,
+) -> GitLabCiConfigSnapshot:
+    return GitLabCiConfigSnapshot(
+        project_path=project_path,
+        collected_at=NOW,
+        images=[] if images is None else images,
+    )
+
+
+# --- Image pinning classification (mirrors K8S-IMG-001) ---------------------------
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "alpine@sha256:" + "a" * 64,
+        "registry.example.com/group/app@sha256:" + "b" * 64,
+        "alpine:3.19@sha256:" + "c" * 64,  # tag + digest: digest wins
+    ],
+)
+def test_digest_pinned_image_passes(image: str) -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=image)])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "alpine:3.19",
+        "registry.example.com:5000/group/app:1.4.2",  # registry with a port
+        "app:v2",
+    ],
+)
+def test_ordinary_explicit_version_tag_passes(image: str) -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=image)])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        "alpine",  # no tag at all
+        "registry.example.com:5000/group/app",  # registry with a port, no tag
+    ],
+)
+def test_no_tag_produces_a_finding(image: str) -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=image)])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 1
+    assert findings[0].check_id == CHECK_MUTABLE_CI_IMAGE
+    assert "(no tag)" in findings[0].evidence
+
+
+@pytest.mark.parametrize("image", ["alpine:latest", "registry.example.com:5000/group/app:latest"])
+def test_latest_tag_produces_a_finding(image: str) -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=image)])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 1
+    assert findings[0].check_id == CHECK_MUTABLE_CI_IMAGE
+    assert "latest" in findings[0].evidence
+
+
+def test_registry_with_port_and_explicit_tag_is_parsed_correctly() -> None:
+    # The port digit sequence must never be mistaken for a tag separator.
+    snapshot = make_ci_snapshot(
+        [make_ci_image_ref(image="registry.example.com:5000/group/app:2.0")]
+    )
+    assert evaluate_ci_image_check(snapshot, audited_at=NOW) == []
+
+
+def test_registry_with_port_and_no_tag_still_produces_a_finding() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="registry.example.com:5000/group/app")])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 1
+
+
+# --- Dynamic references -------------------------------------------------------------
+
+
+def test_dynamic_reference_produces_a_finding() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=None, dynamic=True)])
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 1
+    assert findings[0].check_id == CHECK_MUTABLE_CI_IMAGE
+
+
+def test_dynamic_reference_finding_uses_fixed_generic_resource_name_and_evidence() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=None, dynamic=True)])
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    assert finding.resource_name == "dynamic image reference"
+    assert finding.evidence == (
+        "The CI image reference is dynamic and could not be statically verified."
+    )
+
+
+def test_dynamic_reference_finding_never_leaks_any_expression_content() -> None:
+    # Even though this model can never retain the original expression (see
+    # the model-level invariant tests), this proves the *finding* built from
+    # a dynamic reference is also fully generic -- no job-supplied text
+    # beyond the job name itself appears in resource_name or evidence.
+    snapshot = make_ci_snapshot([make_ci_image_ref(job_name="deploy", image=None, dynamic=True)])
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    for forbidden in ("$", "{", "}", "VAR", "TAG"):
+        assert forbidden not in finding.resource_name
+        assert forbidden not in finding.evidence
+
+
+# --- Finding field assertions --------------------------------------------------------
+
+
+def test_static_finding_fields_are_fully_populated() -> None:
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(
+                job_name="build", resource_kind=GitLabResourceKind.CI_JOB, image="alpine"
+            )
+        ]
+    )
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    assert finding.check_id == CHECK_MUTABLE_CI_IMAGE
+    assert finding.title == "CI job or service container image uses a mutable tag or no tag"
+    assert finding.severity == Severity.HIGH
+    assert finding.project_path == PROJECT_PATH
+    assert finding.resource_kind == GitLabResourceKind.CI_JOB
+    assert finding.resource_name == "alpine"
+    assert finding.job_name == "build"
+    assert finding.auto_remediable is False
+    assert finding.audited_at == NOW
+
+
+def test_ci_job_evidence_mentions_job_wording() -> None:
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(
+                job_name="build", resource_kind=GitLabResourceKind.CI_JOB, image="alpine"
+            )
+        ]
+    )
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    assert "CI job 'build'" in finding.evidence
+
+
+def test_ci_service_evidence_mentions_the_owning_job_not_the_service_as_a_job() -> None:
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(
+                job_name="build", resource_kind=GitLabResourceKind.CI_SERVICE, image="postgres"
+            )
+        ]
+    )
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    assert finding.resource_kind == GitLabResourceKind.CI_SERVICE
+    assert "used by CI job 'build'" in finding.evidence
+
+
+def test_impact_does_not_claim_actual_exploitation_or_compromise() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    impact_lower = finding.impact.lower()
+    assert "reproducibility" in impact_lower
+    assert "rollback" in impact_lower
+    assert "traceability" in impact_lower
+    for forbidden in ("was compromised", "has been exploited", "was exploited", "attacker"):
+        assert forbidden not in impact_lower
+
+
+def test_recommendation_mentions_version_tag_and_digest() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    recommendation_lower = finding.recommendation.lower()
+    assert "version tag" in recommendation_lower
+    assert "digest" in recommendation_lower
+
+
+def test_dynamic_recommendation_mentions_the_expression_without_reproducing_it() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image=None, dynamic=True)])
+    finding = evaluate_ci_image_check(snapshot, audited_at=NOW)[0]
+    assert "variable expression" in finding.recommendation.lower()
+
+
+# --- Multiplicity, ordering, and duplicate handling ---------------------------------
+
+
+def test_one_finding_per_job_and_service_occurrence_no_deduplication() -> None:
+    # The exact same mutable image used by two different jobs produces two
+    # separate findings -- never deduplicated by image string.
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(job_name="first", image="alpine:latest"),
+            make_ci_image_ref(job_name="second", image="alpine:latest"),
+        ]
+    )
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 2
+    assert findings[0].job_name == "first"
+    assert findings[1].job_name == "second"
+
+
+def test_findings_follow_the_snapshots_own_image_order() -> None:
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(
+                job_name="build", resource_kind=GitLabResourceKind.CI_JOB, image="alpine"
+            ),
+            make_ci_image_ref(
+                job_name="build", resource_kind=GitLabResourceKind.CI_SERVICE, image="postgres"
+            ),
+            make_ci_image_ref(
+                job_name="deploy", resource_kind=GitLabResourceKind.CI_JOB, image="app"
+            ),
+        ]
+    )
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert [(f.job_name, f.resource_kind) for f in findings] == [
+        ("build", GitLabResourceKind.CI_JOB),
+        ("build", GitLabResourceKind.CI_SERVICE),
+        ("deploy", GitLabResourceKind.CI_JOB),
+    ]
+
+
+def test_pinned_references_produce_no_finding_and_are_skipped_in_place() -> None:
+    snapshot = make_ci_snapshot(
+        [
+            make_ci_image_ref(job_name="first", image="alpine:1.2.3"),  # pinned, no finding
+            make_ci_image_ref(job_name="second", image="alpine:latest"),  # finding
+        ]
+    )
+    findings = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert len(findings) == 1
+    assert findings[0].job_name == "second"
+
+
+def test_empty_images_list_produces_no_findings() -> None:
+    snapshot = make_ci_snapshot([])
+    assert evaluate_ci_image_check(snapshot, audited_at=NOW) == []
+
+
+# --- audited_at: propagation and timezone-aware validation --------------------------
+
+
+def test_uses_supplied_audited_at_exactly() -> None:
+    when = dt.datetime(2032, 7, 4, 12, 0, tzinfo=dt.UTC)
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    finding = evaluate_ci_image_check(snapshot, audited_at=when)[0]
+    assert finding.audited_at == when
+
+
+def test_naive_audited_at_is_rejected() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    with pytest.raises(ValueError, match="timezone-aware"):
+        evaluate_ci_image_check(snapshot, audited_at=dt.datetime(2026, 1, 1, 12, 0))
+
+
+def test_naive_audited_at_is_rejected_before_producing_any_finding() -> None:
+    # A very obviously-triggering snapshot would otherwise clearly produce a
+    # finding -- proving validation happens first, regardless of content.
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    with pytest.raises(ValueError):
+        evaluate_ci_image_check(snapshot, audited_at=dt.datetime(2026, 1, 1, 12, 0))
+
+
+class _BrokenTzInfoForCiCheck(dt.tzinfo):
+    def utcoffset(self, __dt: dt.datetime | None) -> dt.timedelta | None:
+        return None
+
+    def dst(self, __dt: dt.datetime | None) -> dt.timedelta | None:
+        return None
+
+    def tzname(self, __dt: dt.datetime | None) -> str | None:
+        return "broken"
+
+
+def test_audited_at_with_tzinfo_but_none_utcoffset_is_rejected() -> None:
+    snapshot = make_ci_snapshot([make_ci_image_ref(image="alpine:latest")])
+    broken = dt.datetime(2026, 1, 1, 12, 0, tzinfo=_BrokenTzInfoForCiCheck())
+    with pytest.raises(ValueError, match="timezone-aware"):
+        evaluate_ci_image_check(snapshot, audited_at=broken)
+
+
+# --- Purity: no mutation, deterministic, no I/O --------------------------------------
+
+
+def test_does_not_mutate_snapshot() -> None:
+    snapshot = make_ci_snapshot(
+        [make_ci_image_ref(image="alpine:latest"), make_ci_image_ref(image=None, dynamic=True)]
+    )
+    original = snapshot.model_copy(deep=True)
+    evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert snapshot == original
+
+
+def test_repeated_evaluation_is_deterministic() -> None:
+    snapshot = make_ci_snapshot(
+        [make_ci_image_ref(image="alpine:latest"), make_ci_image_ref(image=None, dynamic=True)]
+    )
+    first = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    second = evaluate_ci_image_check(snapshot, audited_at=NOW)
+    assert first == second
+
+
+def test_evaluator_is_a_pure_function_of_its_snapshot_and_audited_at_arguments() -> None:
+    # No client/collector argument exists on the entry point at all -- this
+    # is a structural guarantee (the function signature itself), not
+    # something that needs a runtime I/O-interception test.
+    import inspect
+
+    signature = inspect.signature(evaluate_ci_image_check)
+    assert list(signature.parameters) == ["snapshot", "audited_at"]
+
+
+# --- Regression: existing GitLab and Kubernetes checks are unaffected ---------------
+
+
+def test_gl_ci_001_import_does_not_change_k8s_img_001_behavior() -> None:
+    from cloudops_guard.checks.kubernetes import _check_mutable_image_tag
+    from cloudops_guard.models import ContainerInfo, ResourceKind
+
+    container = ContainerInfo(name="app", image="app:latest")
+    finding = _check_mutable_image_tag(
+        ResourceKind.POD, "my-pod", "default", container, "test-context", NOW
+    )
+    assert finding is not None
+    assert finding.check_id == "K8S-IMG-001"

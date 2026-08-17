@@ -18,6 +18,8 @@ from cloudops_guard.models import (
     AuditReport,
     Finding,
     GitLabAuditReport,
+    GitLabCiConfigSnapshot,
+    GitLabCiImageReference,
     GitLabFinding,
     GitLabProjectSettings,
     GitLabProjectSnapshot,
@@ -723,3 +725,155 @@ def test_project_snapshot_is_distinct_from_gitlab_audit_report() -> None:
     assert GitLabProjectSnapshot is not GitLabAuditReport
     assert not issubclass(GitLabProjectSnapshot, GitLabAuditReport)
     assert not issubclass(GitLabAuditReport, GitLabProjectSnapshot)
+
+
+# --- GitLabCiImageReference / GitLabCiConfigSnapshot (v0.2.0 Phase 2C-E2) --------
+#
+# These models are additive, like the Phase 2B models above, and are
+# deliberately not nested inside `GitLabProjectSnapshot` -- see
+# `docs/milestones/v0.2.0-gitlab-audit.md`, "GL-CI-001".
+
+
+def make_ci_image_reference(**overrides: object) -> GitLabCiImageReference:
+    defaults: dict[str, object] = {
+        "job_name": "build",
+        "resource_kind": GitLabResourceKind.CI_JOB,
+        "image": "alpine:3.19",
+        "dynamic": False,
+    }
+    defaults.update(overrides)
+    return GitLabCiImageReference(**defaults)
+
+
+def make_ci_config_snapshot(**overrides: object) -> GitLabCiConfigSnapshot:
+    defaults: dict[str, object] = {
+        "project_path": "group/subgroup/project",
+        "collected_at": NOW,
+        "images": [],
+    }
+    defaults.update(overrides)
+    return GitLabCiConfigSnapshot(**defaults)
+
+
+def test_ci_image_reference_constructs_with_a_static_image() -> None:
+    ref = make_ci_image_reference()
+    assert ref.image == "alpine:3.19"
+    assert ref.dynamic is False
+
+
+def test_ci_image_reference_constructs_with_a_dynamic_marker() -> None:
+    ref = make_ci_image_reference(image=None, dynamic=True)
+    assert ref.image is None
+    assert ref.dynamic is True
+
+
+def test_ci_image_reference_accepts_ci_service_resource_kind() -> None:
+    ref = make_ci_image_reference(resource_kind=GitLabResourceKind.CI_SERVICE)
+    assert ref.resource_kind == GitLabResourceKind.CI_SERVICE
+
+
+@pytest.mark.parametrize(
+    "resource_kind", [GitLabResourceKind.PROJECT, GitLabResourceKind.PROTECTED_BRANCH]
+)
+def test_ci_image_reference_rejects_non_ci_resource_kinds(
+    resource_kind: GitLabResourceKind,
+) -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(resource_kind=resource_kind)
+
+
+def test_ci_image_reference_rejects_dynamic_true_with_an_image_string() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(image="alpine:3.19", dynamic=True)
+
+
+def test_ci_image_reference_rejects_dynamic_false_with_no_image() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(image=None, dynamic=False)
+
+
+def test_ci_image_reference_rejects_empty_image_string() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(image="", dynamic=False)
+
+
+def test_ci_image_reference_rejects_empty_job_name() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(job_name="")
+
+
+def test_ci_image_reference_rejects_non_strict_dynamic() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_image_reference(image=None, dynamic=1)
+
+
+def test_ci_image_reference_json_round_trip() -> None:
+    ref = make_ci_image_reference()
+    raw = json.loads(ref.model_dump_json())
+    reloaded = GitLabCiImageReference.model_validate(raw)
+    assert reloaded == ref
+
+
+def test_ci_config_snapshot_constructs_with_required_fields() -> None:
+    snapshot = make_ci_config_snapshot(images=[make_ci_image_reference()])
+    assert snapshot.project_path == "group/subgroup/project"
+    assert len(snapshot.images) == 1
+
+
+def test_ci_config_snapshot_images_defaults_to_empty_list() -> None:
+    snapshot = GitLabCiConfigSnapshot(project_path="group/project", collected_at=NOW)
+    assert snapshot.images == []
+
+
+def test_ci_config_snapshot_default_images_is_independent_across_instances() -> None:
+    a = GitLabCiConfigSnapshot(project_path="group/project", collected_at=NOW)
+    b = GitLabCiConfigSnapshot(project_path="group/project", collected_at=NOW)
+    a.images.append(make_ci_image_reference())
+    assert b.images == []
+
+
+def test_ci_config_snapshot_rejects_naive_datetime() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_config_snapshot(collected_at=dt.datetime(2026, 1, 1, 12, 0))
+
+
+def test_ci_config_snapshot_rejects_empty_project_path() -> None:
+    with pytest.raises(ValidationError):
+        make_ci_config_snapshot(project_path="")
+
+
+def test_ci_config_snapshot_has_no_raw_response_or_catch_all_field() -> None:
+    assert set(GitLabCiConfigSnapshot.model_fields) == {"project_path", "collected_at", "images"}
+
+
+def test_ci_image_reference_has_no_raw_response_or_catch_all_field() -> None:
+    assert set(GitLabCiImageReference.model_fields) == {
+        "job_name",
+        "resource_kind",
+        "image",
+        "dynamic",
+    }
+
+
+def test_ci_config_snapshot_json_round_trip() -> None:
+    snapshot = make_ci_config_snapshot(
+        images=[
+            make_ci_image_reference(),
+            make_ci_image_reference(
+                job_name="build",
+                resource_kind=GitLabResourceKind.CI_SERVICE,
+                image=None,
+                dynamic=True,
+            ),
+        ]
+    )
+    raw = json.loads(snapshot.model_dump_json())
+    reloaded = GitLabCiConfigSnapshot.model_validate(raw)
+    assert reloaded == snapshot
+
+
+def test_ci_config_snapshot_is_distinct_from_project_snapshot() -> None:
+    assert GitLabCiConfigSnapshot is not GitLabProjectSnapshot
+    assert not issubclass(GitLabCiConfigSnapshot, GitLabProjectSnapshot)
+    assert not issubclass(GitLabProjectSnapshot, GitLabCiConfigSnapshot)
+    assert "images" not in GitLabProjectSnapshot.model_fields

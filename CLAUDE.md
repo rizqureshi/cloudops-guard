@@ -13,8 +13,9 @@ regardless of which milestone is currently in progress.
   client foundation, a normalized instance/project/protected-branch collector, the
   protected-default-branch checks (`GL-BR-001` through `GL-BR-003`), the
   project-setting checks (`GL-MR-001`, `GL-SEC-001` through `GL-SEC-003`,
-  `GL-COST-001`, `GL-COST-002`), and the job timeout check (`GL-REL-001`) exist;
-  `GL-CI-001`, GitLab evaluator/report integration, and CLI integration do not yet.
+  `GL-COST-001`, `GL-COST-002`), the job timeout check (`GL-REL-001`), and the
+  separate CI Lint collection/normalization together with `GL-CI-001` exist;
+  GitLab evaluator/report integration and CLI integration do not yet.
   Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
   authentication, a web dashboard, billing or LLM integration until a milestone
   explicitly calls for it.
