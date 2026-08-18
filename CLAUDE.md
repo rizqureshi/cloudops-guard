@@ -25,10 +25,13 @@ regardless of which milestone is currently in progress.
   Kubernetes report generation (`generate_reports`, `report.html.j2`) and the
   Kubernetes CLI command remain a separate, unchanged contract. Controlled
   GitLab.com acceptance testing has passed for the GitLab.com Free /
-  Owner role / `read_api`-scoped legacy personal access token combination
-  (see `docs/milestones/v0.2.0-gitlab-audit.md`, "Controlled GitLab.com
-  acceptance record — 2026-08-18"); Maintainer role, additional token types
-  (project/group access tokens), self-managed GitLab 18.4+, and release
+  `read_api`-scoped legacy personal access token combination, at both the
+  Owner role and (via a dedicated project service account) the Maintainer
+  role (see `docs/milestones/v0.2.0-gitlab-audit.md`, "Controlled GitLab.com
+  acceptance record — 2026-08-18"); this is GitLab.com-specific evidence only
+  and does not lower the documented universal minimum role of Owner. A human
+  Maintainer account, project/group access tokens, OAuth tokens, fine-grained
+  PATs, administrator tokens, self-managed GitLab 18.4+, and release
   preparation remain outstanding.
   Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
   authentication, a web dashboard, billing or LLM integration until a milestone
