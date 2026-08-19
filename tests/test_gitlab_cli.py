@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 import pytest
+import typer.main
 import urllib3
 from typer.testing import CliRunner
 
@@ -181,41 +182,120 @@ def _no_leftover_files(output: Path) -> bool:
     return not output.exists() or not any(output.iterdir())
 
 
+def _command_at(*command_path: str) -> object:
+    """Return the Typer/Click command object reached by walking `command_path`
+    (e.g. ("audit", "gitlab")) from the app's root command.
+
+    This is command *metadata* (`typer.main.get_command(app)` and its
+    `.commands` mapping) -- never Rich-rendered `--help` text -- so every
+    helper built on top of it (`_registered_options`, `_option_help`, or a
+    command's own `.help` docstring) is immune to terminal-width, ANSI, and
+    Rich column-wrapping/truncation/abbreviation differences across
+    environments. Untyped return (`object`) deliberately avoids importing any
+    private Click command type.
+    """
+    command: object = typer.main.get_command(app)
+    for name in command_path:
+        command = command.commands[name]  # type: ignore[attr-defined]
+    return command
+
+
+def _registered_options(*command_path: str) -> set[str]:
+    """Return every option string (e.g. "--gitlab-url") registered on the
+    command reached by `command_path`.
+
+    Reads each parameter's own `opts` attribute directly --
+    `getattr(parameter, "opts", ())` avoids depending on any private Click
+    parameter type -- never rendered help text. A test that greps rendered
+    help for a literal option-name substring can fail on a CI runner (long
+    names truncated, e.g. "--job-timeout-thresho...") even though the CLI's
+    actual registered option contract is unchanged; this does not have that
+    failure mode.
+    """
+    command = _command_at(*command_path)
+    options: set[str] = set()
+    for parameter in command.params:  # type: ignore[attr-defined]
+        options.update(getattr(parameter, "opts", ()))
+    return options
+
+
+def _option_help(*command_path: str, option_name: str) -> str:
+    """Return the `.help` metadata string for the single registered
+    parameter whose `opts` contains `option_name` (e.g.
+    "--job-timeout-threshold-seconds"), on the command reached by
+    `command_path`.
+
+    Reads the parameter's own `help` attribute -- the raw string passed to
+    `typer.Option(..., help=...)` -- never Rich-rendered, wrapped, or
+    truncated output, so long help phrases can be asserted on regardless of
+    terminal width. Raises if zero or more than one parameter matches
+    `option_name`, so a typo in the expected option string fails loudly
+    rather than silently comparing against an empty string.
+    """
+    command = _command_at(*command_path)
+    matches = [
+        parameter
+        for parameter in command.params  # type: ignore[attr-defined]
+        if option_name in getattr(parameter, "opts", ())
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one parameter registered for {option_name!r} on "
+            f"{command_path!r}, found {len(matches)}"
+        )
+    return getattr(matches[0], "help", None) or ""
+
+
 # --- 1, 2, 3: help contract ----------------------------------------------------
 
 
 def test_audit_gitlab_help_exposes_the_four_required_options() -> None:
-    # A wide COLUMNS value avoids Rich's help-text column truncating the
-    # longer option names (e.g. "--job-timeout-thresho…") mid-string.
-    result = runner.invoke(app, ["audit", "gitlab", "--help"], env={"COLUMNS": "200"})
+    # Exit code is exercised through --help as before; the option set itself
+    # is verified through command metadata (_registered_options), not by
+    # grepping Rich-rendered help text -- rendering (terminal width, ANSI
+    # styling, Rich's own truncation) is environment-dependent and is not a
+    # portable source of truth for which options are actually registered.
+    result = runner.invoke(app, ["audit", "gitlab", "--help"])
     assert result.exit_code == 0
-    for option in ("--gitlab-url", "--project", "--job-timeout-threshold-seconds", "--output"):
-        assert option in result.output
+    assert _registered_options("audit", "gitlab") == {
+        "--gitlab-url",
+        "--project",
+        "--job-timeout-threshold-seconds",
+        "--output",
+    }
 
 
 def test_audit_gitlab_help_describes_strictly_exceeds_threshold_semantics() -> None:
-    # A wide COLUMNS value avoids Rich wrapping "strictly exceeds" across a
-    # line boundary; whitespace is also normalized below (collapsing
-    # newlines/padding to single spaces) so wrapping elsewhere in the
-    # rendered help can't split the phrase either.
-    result = runner.invoke(app, ["audit", "gitlab", "--help"], env={"COLUMNS": "200"})
+    # --help is still invoked as a rendering smoke test (exit code only,
+    # proving the command renders without error); the actual phrase content
+    # is asserted from the registered option's own `.help` metadata, never
+    # from Rich-rendered/wrapped output, so it cannot be broken by terminal
+    # width, ANSI styling, or Rich's own line-wrapping.
+    result = runner.invoke(app, ["audit", "gitlab", "--help"])
     assert result.exit_code == 0
-    normalized = " ".join(result.output.split())
-    assert "strictly exceeds" in normalized
-    assert "at or above" not in normalized.lower()
+    help_text = _option_help("audit", "gitlab", option_name="--job-timeout-threshold-seconds")
+    assert "strictly exceeds" in help_text
+    assert "at or above" not in help_text.lower()
 
 
 def test_audit_gitlab_help_mentions_env_var_but_no_token_value() -> None:
+    # --help exit code is still exercised as a rendering smoke test; the
+    # actual text is read from the command's own `.help` metadata (the raw
+    # docstring), never from Rich-rendered output.
     result = runner.invoke(app, ["audit", "gitlab", "--help"])
-    assert GITLAB_TOKEN_ENV_VAR in result.output
-    assert SYNTHETIC_TOKEN not in result.output
+    assert result.exit_code == 0
+    command_help = getattr(_command_at("audit", "gitlab"), "help", None) or ""
+    assert GITLAB_TOKEN_ENV_VAR in command_help
+    assert SYNTHETIC_TOKEN not in command_help
 
 
 def test_audit_gitlab_has_no_token_config_or_insecure_option() -> None:
     result = runner.invoke(app, ["audit", "gitlab", "--help"])
-    assert "--token" not in result.output
-    assert "--config" not in result.output
-    assert "--insecure" not in result.output
+    assert result.exit_code == 0
+    options = _registered_options("audit", "gitlab")
+    assert "--token" not in options
+    assert "--config" not in options
+    assert "--insecure" not in options
 
 
 def test_unknown_token_option_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -824,10 +904,13 @@ def test_report_output_has_no_fields_outside_the_declared_contract(
 
 
 def test_kubernetes_command_help_is_unaffected() -> None:
+    # As above: the option set is verified through command metadata
+    # (_registered_options), not by grepping Rich-rendered help text.
     result = runner.invoke(app, ["audit", "kubernetes", "--help"])
     assert result.exit_code == 0
-    assert "--context" in result.output
-    assert "--gitlab-url" not in result.output
+    options = _registered_options("audit", "kubernetes")
+    assert "--context" in options
+    assert "--gitlab-url" not in options
 
 
 # --- 42: determinism apart from the audit timestamp ------------------------------

@@ -8,10 +8,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -34,11 +34,41 @@ jobs:
       - name: Build wheel and sdist
         run: uv build
 
-      - name: Verify report.html.j2 is packaged in the wheel
+      - name: Verify both report templates are packaged in the wheel
         run: |
-          wheel_file=$(ls dist/*.whl)
-          if ! unzip -l "$wheel_file" | grep -q "cloudops_guard/reports/templates/report.html.j2"; then
-            echo "report.html.j2 missing from built wheel: $wheel_file"
-            unzip -l "$wheel_file"
+          # nullglob makes a no-match `dist/*.whl` expand to zero array
+          # elements instead of the literal, unexpanded glob string -- so
+          # the "exactly one wheel" check below correctly reports zero
+          # wheels as zero, not as one file named "dist/*.whl".
+          shopt -s nullglob
+          wheel_files=(dist/*.whl)
+          shopt -u nullglob
+
+          if [ "${#wheel_files[@]}" -ne 1 ]; then
+            echo "Expected exactly one built wheel in dist/, found ${#wheel_files[@]}: ${wheel_files[*]}"
             exit 1
           fi
+          wheel_file="${wheel_files[0]}"
+
+          # `unzip -Z1` lists member names only, one per line, with no
+          # header/footer/size columns -- so matching against it with
+          # `grep -Fxq` (fixed-string, whole-line) can never produce a false
+          # positive from an unrelated column or from a template name being
+          # interpreted as a regex, unlike `unzip -l | grep -q`.
+          wheel_contents="$(unzip -Z1 "$wheel_file")"
+
+          missing=0
+          for template in \
+            "cloudops_guard/reports/templates/report.html.j2" \
+            "cloudops_guard/reports/templates/gitlab_report.html.j2"; do
+            if ! grep -Fxq -- "$template" <<<"$wheel_contents"; then
+              echo "Missing from built wheel ($wheel_file): $template"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "$wheel_contents"
+            exit 1
+          fi
+
+          echo "Both report templates present in $wheel_file"
