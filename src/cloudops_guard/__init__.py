@@ -1,3 +1,5 @@
-"""CloudOps Guard: read-only auditing for Kubernetes, cloud reliability, security and cost."""
+"""CloudOps Guard: read-only Kubernetes and GitLab CI/CD auditing for reliability,
+security and cost hygiene.
+"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

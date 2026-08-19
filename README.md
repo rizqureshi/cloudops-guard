@@ -4,24 +4,29 @@ Cloud reliability, security and cost control for growing software companies.
 
 CloudOps Guard is (eventually) a commercial, **read-only** auditing platform covering
 Kubernetes, GitLab CI/CD, cloud reliability, security and cost optimization. This
-repository currently implements the first milestone only: a **Kubernetes audit MVP**.
+repository currently implements the first two milestones: a **Kubernetes audit MVP**
+and a **GitLab CI/CD audit MVP**, each its own CLI subcommand and report set.
 
-## Current MVP scope
+## Current scope
 
-- A single CLI command: `cloudops-guard audit kubernetes`.
-- Read-only collection of namespace, pod, container, deployment and replicaset
-  metadata via the official Kubernetes Python client. `--namespace` runs entirely on
-  namespace-scoped APIs (see [RBAC permissions](#rbac-permissions-least-privilege)).
-- Five deterministic container checks (missing CPU/memory requests and limits, mutable
+- Two CLI commands: `cloudops-guard audit kubernetes` and `cloudops-guard audit gitlab`.
+- **Kubernetes**: read-only collection of namespace, pod, container, deployment and
+  replicaset metadata via the official Kubernetes Python client. `--namespace` runs
+  entirely on namespace-scoped APIs (see [RBAC permissions](#rbac-permissions-least-privilege)).
+  Five deterministic container checks (missing CPU/memory requests and limits, mutable
   image tags), plus a per-container excessive-restart check.
-- `report.json` and `report.html` output, and a terminal summary of findings by
-  severity.
+- **GitLab**: read-only, single-project audit of protected-branch rules, merge-request
+  and CI/CD project settings, and CI job/service container image references, via the
+  GitLab REST API v4 and CI Lint API. Eleven deterministic checks (see
+  [GitLab checks](#gitlab-checks) below).
+- Each platform writes its own `report.json` and `report.html` into the `--output`
+  directory, and prints a terminal summary of findings by severity. GitLab reports
+  contain no Kubernetes-only fields, and vice versa.
 
-## Non-goals (for this milestone)
+## Non-goals (for these milestones)
 
 The following are explicitly **not** implemented yet:
 
-- GitLab CI/CD auditing.
 - AKS/EKS-specific integrations.
 - A database or any persistent storage.
 - SaaS multi-tenancy.
@@ -31,6 +36,9 @@ The following are explicitly **not** implemented yet:
 - LLM integration.
 - Remediation (automatic or suggested fixes are not applied; findings only note whether
   a check *could* eventually be auto-remediated).
+- GitLab: multi-project, group-wide, or namespace-wide scoping (one project per audit
+  run); pipeline/job execution or simulation; CI/CD variables, job logs, traces, or
+  artifacts.
 
 ## Python setup
 
@@ -72,7 +80,7 @@ ruff). Standard wheel/sdist packaging still works normally either way:
 python -m build   # requires the `build` package; produces dist/*.whl and dist/*.tar.gz
 ```
 
-## CLI usage
+## Kubernetes CLI usage
 
 ```bash
 # Audit every namespace in a context
@@ -139,6 +147,99 @@ Deployment-managed pods are evaluated once, at the Deployment (via real
 Pod→ReplicaSet→Deployment owner references, not name matching) — this avoids one
 finding per replica. Restart counts are still evaluated per pod, since that's runtime
 data rather than spec data.
+
+## GitLab CLI usage
+
+```bash
+# Never put the token on the command line, in a config file, or in shell history.
+# `read -s` reads it with terminal echo disabled instead.
+read -s -p 'GitLab token: ' CLOUDOPS_GUARD_GITLAB_TOKEN
+export CLOUDOPS_GUARD_GITLAB_TOKEN
+echo
+
+cloudops-guard audit gitlab \
+  --gitlab-url https://gitlab.example.com \
+  --project group/subgroup/project \
+  --job-timeout-threshold-seconds 3600 \
+  --output ./reports/gitlab
+
+# Unset the token once you're done — it's no longer needed after the audit runs.
+unset CLOUDOPS_GUARD_GITLAB_TOKEN
+```
+
+All four flags are required; there is no `--token`, `--config`, or TLS-skip option.
+
+- **Token**: read only from the `CLOUDOPS_GUARD_GITLAB_TOKEN` environment variable —
+  CloudOps Guard never accepts it as a CLI argument or a configuration-file value, so
+  it never appears in a CloudOps Guard command line or a committed CloudOps Guard
+  configuration file. This does not guarantee the variable is safe from every
+  operating-system- or user-level exposure path outside CloudOps Guard's control (for
+  example, a shell that logs exported environment variables, or a process inspection
+  tool) — protecting the environment variable itself remains the operator's
+  responsibility. The `read -s` example above hides the value from terminal echo
+  while typing; unset the variable once the audit no longer needs it. Required scope:
+  `read_api`. The broader `api` scope is never required.
+- `--gitlab-url`: the instance's base URL. Use `https://` for any real deployment —
+  a plain-HTTP URL was exercised only as a controlled local acceptance-test condition
+  against a loopback instance, not as a supported production configuration.
+- `--project`: the target project, as either a numeric project ID or its canonical
+  full path (e.g. `group/subgroup/project`). Audits exactly one project per run; there
+  is no group-wide or namespace-wide scope.
+- `--job-timeout-threshold-seconds`: a required positive-integer threshold for
+  `GL-REL-001` — no product-level default is guessed. A finding is produced only when
+  the project's configured job timeout **strictly exceeds** this threshold; a timeout
+  equal to or below it passes.
+- `--output`: directory to write `report.json` and `report.html` into, matching the
+  `audit kubernetes` convention.
+
+The command exits non-zero if input validation, token setup, collection, or report
+generation fails, and `0` regardless of how many findings are reported. A project with
+a missing or invalid `.gitlab-ci.yml` currently produces a sanitized collection
+failure: collection fails before report generation is ever reached, so the failed run
+writes no new report files. Any complete `report.json`/`report.html` already present
+in the output directory from an earlier successful run is not removed and may remain
+there. This failure must not be interpreted as an empty or clean audit.
+
+### Minimum access
+
+- **Token scope**: `read_api` (tested and required; `api` is never needed).
+- **Effective project role**: **Maintainer** is the documented minimum; **Owner**
+  remains sufficient. This has been confirmed through controlled live acceptance
+  testing on GitLab.com's current hosted version (Maintainer tested via a project
+  **service account**) and on self-managed **GitLab Community Edition 18.4.6**
+  (Maintainer tested via an ordinary, non-service-account internal user account) —
+  see `docs/milestones/v0.2.0-gitlab-audit.md` for the full, precisely bounded
+  evidence. **Not yet tested**: any self-managed GitLab release/version other than
+  CE 18.4.6; GitLab Enterprise Edition or its Premium/Ultimate tiers; a
+  human-operated Maintainer account on GitLab.com; and any token type other than a
+  legacy personal access token (project/group access tokens, OAuth tokens,
+  fine-grained PATs, administrator tokens).
+- **Supported instances**: GitLab.com (current hosted version) and self-managed
+  GitLab 18.4+. Live acceptance evidence for self-managed specifically covers CE
+  18.4.6.
+
+### GitLab checks
+
+| Check ID      | What it flags                                                          | Severity |
+| ------------- | ------------------------------------------------------------------------ | -------- |
+| `GL-BR-001`   | Default branch is not protected                                          | High     |
+| `GL-BR-002`   | Force-push is allowed on the default branch                              | High     |
+| `GL-BR-003`   | Developers can push directly to the default branch                       | Medium   |
+| `GL-MR-001`   | Successful pipelines are not required before merge                       | Medium   |
+| `GL-SEC-001`  | CI/CD pipeline details have broad visibility                             | High     |
+| `GL-SEC-002`  | CI job tokens are permitted to push to the repository                    | High     |
+| `GL-SEC-003`  | Pipeline-variable override permissions are more permissive than Maintainer | High   |
+| `GL-COST-001` | Redundant pipelines are not automatically cancelled                      | Low      |
+| `GL-COST-002` | Git clone depth is unlimited                                             | Low      |
+| `GL-REL-001`  | Project job timeout exceeds a configurable threshold                     | Medium   |
+| `GL-CI-001`   | CI job or service container image uses a mutable tag or no tag           | High     |
+
+The GitLab audit is read-only: it never executes pipelines or jobs, never mutates the
+repository, and never calls a CI/CD variables, job-log, trace, artifact, or
+runner-management endpoint. See `docs/milestones/v0.2.0-gitlab-audit.md` for each
+check's full condition, evidence, and rationale, and for the detailed controlled
+acceptance-test records (GitLab.com and self-managed GitLab CE 18.4.6) behind the
+minimum-access conclusions above.
 
 ## Manual acceptance test with a local `kind` cluster
 
@@ -507,7 +608,9 @@ listed — consistent with the read-only, no-sensitive-data design described bel
 
 ## Security and privacy behaviour
 
-CloudOps Guard is **read-only** by design:
+CloudOps Guard is **read-only** by design on every platform it audits.
+
+### Kubernetes
 
 - It never modifies, creates or deletes any Kubernetes resource — it only calls `list`
   APIs.
@@ -525,6 +628,25 @@ CloudOps Guard is **read-only** by design:
   one-line CLI message and exit with a non-zero status — not a raw traceback.
 - The Kubernetes API client is injectable, so the test suite never needs a live
   cluster and never talks to a real API server.
+
+### GitLab
+
+- It never calls a write GitLab API operation, executes a pipeline or job, or mutates
+  the repository — it only uses read-only endpoints (an explicit, narrow allowlist,
+  including `GET /projects/:id`, protected-branch listing, and the CI Lint API).
+- It never calls a project, group, or instance **CI/CD variables** endpoint.
+- It never collects or reports job traces, logs, artifacts, credentials, or tokens.
+- It never persists raw or merged CI YAML in a report; CI configuration is processed
+  only in memory, retaining just the normalized, non-sensitive fields a check needs.
+- It never prints the `CLOUDOPS_GUARD_GITLAB_TOKEN` value or an authentication header,
+  including in error messages.
+- `GET /projects/:id` is the one approved endpoint GitLab does not let CloudOps Guard
+  field-filter, so it can transiently return unrelated sensitive fields (notably
+  `runners_token`); these are discarded immediately at normalization and never
+  retained, logged, or reported. See `docs/milestones/v0.2.0-gitlab-audit.md` for the
+  full rationale.
+- A failure to access required information fails the audit (non-zero exit) rather than
+  silently producing a partial report that looks clean.
 
 ## Running tests, linting and formatting
 
@@ -545,10 +667,11 @@ ruff format .
 
 ## Expected output files
 
-Running `audit kubernetes --output <dir>` writes two files into `<dir>` (created if it
-doesn't exist):
+Running `audit kubernetes --output <dir>` or `audit gitlab --output <dir>` writes two
+files into `<dir>` (created if it doesn't exist), each platform-specific and with no
+fields from the other platform:
 
-- `report.json` — the full `AuditReport` (findings, summary counts, metadata) as JSON.
+- `report.json` — the full audit report (findings, summary counts, metadata) as JSON.
 - `report.html` — a static, dependency-free HTML report. No JavaScript, no external
   resources (fonts, scripts, stylesheets) — it renders fully offline in any browser.
 
@@ -556,6 +679,6 @@ doesn't exist):
 
 Not implemented yet, planned for future milestones:
 
-- GitLab CI/CD pipeline auditing.
-- Cloud cost analysis.
+- AKS/EKS-specific cloud integrations.
+- Broader cloud cost analysis.
 - A persistent, multi-tenant web dashboard.

@@ -1,7 +1,7 @@
 [project]
 name = "cloudops-guard"
-version = "0.1.0"
-description = "Read-only auditing for Kubernetes reliability, security and cost hygiene"
+version = "0.2.0"
+description = "Read-only auditing for Kubernetes and GitLab CI/CD reliability, security and cost hygiene"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
@@ -32,6 +32,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cloudops_guard"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.claude"]
 
 [tool.ruff]
 line-length = 100
