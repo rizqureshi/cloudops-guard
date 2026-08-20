@@ -6,11 +6,11 @@ regardless of which milestone is currently in progress.
 ## Scope discipline
 
 - Work incrementally, one milestone at a time. v0.1.0, the Kubernetes audit MVP, is
-  released (see README.md). The current milestone is v0.2.0: a read-only,
-  single-project GitLab CI/CD Audit MVP — see
-  `docs/milestones/v0.2.0-gitlab-audit.md` for its objective, command interface,
-  checks, invariants and non-goals. GitLab implementation and controlled acceptance
-  testing for the documented v0.2.0 scope are complete: the HTTP client foundation, a
+  released (see README.md). v0.2.0, the read-only, single-project GitLab CI/CD Audit
+  MVP, is also released — see `docs/milestones/v0.2.0-gitlab-audit.md` for its
+  objective, command interface, checks, invariants and non-goals. GitLab
+  implementation and controlled acceptance testing for the documented v0.2.0 scope
+  are complete: the HTTP client foundation, a
   normalized instance/project/protected-branch collector, the
   protected-default-branch checks (`GL-BR-001` through `GL-BR-003`), the
   project-setting checks (`GL-MR-001`, `GL-SEC-001` through `GL-SEC-003`,
@@ -37,17 +37,18 @@ regardless of which milestone is currently in progress.
   self-managed GitLab releases/editions, project/group access tokens, OAuth
   tokens, fine-grained PATs, administrator tokens remain outstanding for
   future evidence-broadening, and do not block this milestone's documented
-  scope. v0.2.0 release-candidate preparation (version bump,
-  README/documentation update, packaging validation) is **complete**. Remote
-  CI (GitHub Actions) passed on commit
-  `ac75c487b6c633c758b09f71a38b198357688edb`, the
-  **pre-release-preparation baseline** — that commit does not include the
-  release-preparation changes, so it does not validate them. The
-  release-preparation commit must itself pass remote GitHub Actions before
-  v0.2.0 is tagged. **v0.2.0 has not yet been tagged or published as a
-  GitHub Release** — tagging and release publication remain outstanding.
-  Do not start AKS/EKS-specific code, a database, SaaS multi-tenancy,
-  authentication, a web dashboard, billing or LLM integration until a milestone
+  scope. v0.2.0 was tagged as the annotated tag `v0.2.0`, peeling to release
+  commit `ed358dc4006697632aaf87bafb654b44a18daa8c`, for which remote CI
+  (GitHub Actions) passed. It was published as a GitHub Release —
+  "CloudOps Guard v0.2.0 — GitLab Audit MVP"
+  (<https://github.com/rizqureshi/cloudops-guard/releases/tag/v0.2.0>),
+  published 2026-08-19T21:36:19Z — non-draft, non-prerelease, and identified
+  by GitHub as the latest release. Implementation, controlled acceptance,
+  release preparation, release CI, annotated tagging, and GitHub Release
+  publication are all complete for the documented v0.2.0 scope. No
+  subsequent implementation milestone has been defined yet: do not start
+  AKS/EKS-specific code, a database, SaaS multi-tenancy, authentication, a
+  web dashboard, billing or LLM integration until a future milestone
   explicitly calls for it.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
