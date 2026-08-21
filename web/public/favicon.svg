@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="CloudOps Guard">
+  <rect width="32" height="32" rx="7" fill="#0e4fb8" />
+  <path
+    d="M16 6c4.5 1.4 8 2 8 2v8.2c0 5.4-3.6 8.9-8 10.8-4.4-1.9-8-5.4-8-10.8V8s3.5-.6 8-2Z"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M12 16.2l2.6 2.6 5.4-5.6"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

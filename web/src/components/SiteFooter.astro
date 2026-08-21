@@ -1,0 +1,54 @@
+---
+// Deliberately minimal: no legal, social-media, product, or contact links
+// exist yet -- those routes (/privacy, /feedback, /request-demo, etc.) are
+// not implemented until later phases (§D, §M), so this footer does not
+// link to them.
+const year = new Date().getUTCFullYear();
+---
+
+<footer class="site-footer">
+  <div class="container site-footer__inner">
+    <p class="site-footer__identity">
+      <strong>CloudOps Guard</strong> &mdash; read-only auditing for Kubernetes and
+      GitLab CI/CD.
+    </p>
+    <p class="site-footer__privacy">
+      This site never uploads or transmits an audit report you select on it &mdash;
+      report exploration, once available, runs entirely in your browser.
+    </p>
+    <p class="site-footer__meta">&copy; {year} CloudOps Guard.</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    margin-top: var(--space-2xl);
+  }
+
+  .site-footer__inner {
+    padding-block: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+  }
+
+  .site-footer__identity {
+    margin: 0;
+    color: var(--color-text);
+  }
+
+  .site-footer__privacy {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    max-width: var(--container-narrow);
+  }
+
+  .site-footer__meta {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+  }
+</style>

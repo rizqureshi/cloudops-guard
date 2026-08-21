@@ -52,11 +52,19 @@ regardless of which milestone is currently in progress.
   handling, comparison semantics, synthetic-data requirements, privacy
   boundary, contact/feedback boundary, deployment plan, accessibility target,
   non-goals, acceptance criteria, and phased plan (Phases 3A–3K). Its
-  architecture and scope are approved; **Phase 3A (this milestone document and
-  the accompanying `CLAUDE.md` update) is documentation-only, and no
-  implementation has started** — no `web/` directory, package manifest,
-  source file, workflow, or dependency exists yet, and nothing has been
-  deployed or published. v0.1.0 and v0.2.0 remain the released product
+  architecture and scope are approved; **Phase 3A (the milestone document and
+  the accompanying `CLAUDE.md` update) is complete.** **Phase 3B has
+  introduced the Astro/React/TypeScript web foundation** under a new `web/`
+  directory (project skeleton, project-owned CSS design-token system, shared
+  header/footer layout, one static page at `/`) and a validation-only
+  `web-ci.yml` (type check, lint, build — never deploys). **The web
+  foundation is static**, with zero client-side hydration on its one page.
+  Report parsing, synthetic Kubernetes/GitLab demonstration data, the local
+  report explorer, comparison logic, the executive summary, the check
+  catalogue and other product pages, the contact/feedback endpoint(s), any
+  Cloudflare/deployment configuration, and every later phase in §R are **not
+  yet implemented**. **Nothing has been deployed, released, or published for
+  v0.3.0.** v0.1.0 and v0.2.0 remain unchanged, released product
   capabilities; do not start AKS/EKS-specific code, cloud cost intelligence,
   a database, SaaS multi-tenancy, authentication, billing or LLM integration
   until a milestone explicitly calls for it — v0.3.0 does not call for any of
@@ -72,8 +80,8 @@ regardless of which milestone is currently in progress.
 
 ## Web application invariants (v0.3.0+)
 
-These apply once v0.3.0 implementation begins; see
-`docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
+These apply from Phase 3B onward, now that v0.3.0 implementation has begun;
+see `docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
 
 - Report files a user selects are processed **locally in the browser only**
   and are **never uploaded** to any server.

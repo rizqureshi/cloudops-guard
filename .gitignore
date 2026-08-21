@@ -25,3 +25,8 @@ htmlcov/
 # Local audit output
 /reports/
 /out/
+
+# Web (Astro/Node) generated files
+web/node_modules/
+web/.astro/
+web/dist/

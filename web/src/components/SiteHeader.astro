@@ -1,0 +1,75 @@
+---
+// Minimal header for the Phase 3B foundation: only the "/" route exists, so
+// there is deliberately no navigation to unimplemented routes (§D routes
+// such as /demo/kubernetes, /explorer, /checks, etc. arrive in later
+// phases). A text-based wordmark stands in for a logo -- no external image
+// or font is loaded.
+---
+
+<header class="site-header">
+  <div class="container site-header__inner">
+    <a class="site-header__wordmark" href="/" aria-label="CloudOps Guard home">
+      <span class="site-header__mark" aria-hidden="true">CG</span>
+      <span class="site-header__name">CloudOps&nbsp;Guard</span>
+    </a>
+    <p class="site-header__state">
+      Web foundation preview &mdash; interactive demos not yet available
+    </p>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
+  .site-header__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    padding-block: var(--space-sm);
+    min-width: 0;
+  }
+
+  .site-header__wordmark,
+  .site-header__state {
+    min-width: 0;
+  }
+
+  .site-header__wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    text-decoration: none;
+    color: var(--color-text);
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-md);
+  }
+
+  .site-header__wordmark:hover .site-header__name {
+    text-decoration: underline;
+  }
+
+  .site-header__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    background: var(--color-brand-600);
+    color: var(--color-text-on-brand);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: 0.02em;
+  }
+
+  .site-header__state {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+  }
+</style>
