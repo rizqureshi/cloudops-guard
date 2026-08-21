@@ -45,15 +45,54 @@ regardless of which milestone is currently in progress.
   published 2026-08-19T21:36:19Z — non-draft, non-prerelease, and identified
   by GitHub as the latest release. Implementation, controlled acceptance,
   release preparation, release CI, annotated tagging, and GitHub Release
-  publication are all complete for the documented v0.2.0 scope. No
-  subsequent implementation milestone has been defined yet: do not start
-  AKS/EKS-specific code, a database, SaaS multi-tenancy, authentication, a
-  web dashboard, billing or LLM integration until a future milestone
-  explicitly calls for it.
+  publication are all complete for the documented v0.2.0 scope.
+- **The current approved milestone is v0.3.0: Interactive Web Demo and Local
+  Report Explorer** — see `docs/milestones/v0.3.0-interactive-web-demo.md` for
+  its full objective, approved technology stack, routes, report-contract
+  handling, comparison semantics, synthetic-data requirements, privacy
+  boundary, contact/feedback boundary, deployment plan, accessibility target,
+  non-goals, acceptance criteria, and phased plan (Phases 3A–3K). Its
+  architecture and scope are approved; **Phase 3A (this milestone document and
+  the accompanying `CLAUDE.md` update) is documentation-only, and no
+  implementation has started** — no `web/` directory, package manifest,
+  source file, workflow, or dependency exists yet, and nothing has been
+  deployed or published. v0.1.0 and v0.2.0 remain the released product
+  capabilities; do not start AKS/EKS-specific code, cloud cost intelligence,
+  a database, SaaS multi-tenancy, authentication, billing or LLM integration
+  until a milestone explicitly calls for it — v0.3.0 does not call for any of
+  those.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
+  (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
+  `web/` directory once implementation begins — see the milestone document —
+  and does not license adding a Python web framework, database, or AI/LLM API
+  to the `cloudops_guard` package itself.)
 - Explain important architectural changes before making them — don't silently restructure
   the collector/checks/engine/reports separation.
+
+## Web application invariants (v0.3.0+)
+
+These apply once v0.3.0 implementation begins; see
+`docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
+
+- Report files a user selects are processed **locally in the browser only**
+  and are **never uploaded** to any server.
+- The website must never accept customer credentials, a kubeconfig file, or a
+  GitLab token as input.
+- Imported reports must never be persisted in `localStorage`, `sessionStorage`,
+  `IndexedDB`, cookies, or a service-worker cache — closing or reloading the
+  tab clears them.
+- No analytics, session replay, or third-party scripts on demo/explorer
+  routes.
+- The contact/feedback endpoint(s) must remain architecturally isolated from
+  report data — no code path may send an imported report or derived finding
+  content to them.
+- The existing Python `AuditReport`/`GitLabAuditReport` report contracts must
+  not change to accommodate the web UI; all report normalization for the
+  website happens in TypeScript, in the browser, against the JSON these
+  models already produce.
+- Production deployment is manual and requires explicit user authorization —
+  never automatic on push or merge.
 
 ## Read-only invariant
 
