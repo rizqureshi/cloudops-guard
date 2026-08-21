@@ -57,18 +57,26 @@ regardless of which milestone is currently in progress.
   introduced the Astro/React/TypeScript web foundation** under a new `web/`
   directory (project skeleton, project-owned CSS design-token system, shared
   header/footer layout, one static page at `/`) and a validation-only
-  `web-ci.yml` (type check, lint, build — never deploys). **The web
-  foundation is static**, with zero client-side hydration on its one page.
-  Report parsing, synthetic Kubernetes/GitLab demonstration data, the local
-  report explorer, comparison logic, the executive summary, the check
-  catalogue and other product pages, the contact/feedback endpoint(s), any
-  Cloudflare/deployment configuration, and every later phase in §R are **not
-  yet implemented**. **Nothing has been deployed, released, or published for
-  v0.3.0.** v0.1.0 and v0.2.0 remain unchanged, released product
-  capabilities; do not start AKS/EKS-specific code, cloud cost intelligence,
-  a database, SaaS multi-tenancy, authentication, billing or LLM integration
-  until a milestone explicitly calls for it — v0.3.0 does not call for any of
-  those.
+  `web-ci.yml` (type check, lint, unit tests, build — never deploys). **The
+  web foundation is static**, with zero client-side hydration on its one
+  page. **Phase 3C has introduced the browser-side report-contract layer**
+  under `web/src/features/report-import/`: strict Zod schemas mirroring the
+  released Kubernetes and GitLab `report.json` contracts,
+  `parseKubernetesReport`/`parseGitLabReport`/`parseReport`, a normalized
+  `NormalizedWebReport` representation, deterministic severity-summary
+  recomputation, and sanitized validation errors, covered by Vitest unit
+  tests that `web-ci.yml` now runs. **This schema/adapter layer is not yet
+  exposed through any user interface** — there is no report-import UI, no
+  file selection, and no rendering of a parsed report anywhere on the site.
+  Synthetic Kubernetes/GitLab demonstration data, the local report explorer,
+  comparison logic, the executive summary, the check catalogue and other
+  product pages, the contact/feedback endpoint(s), any Cloudflare/deployment
+  configuration, and every later phase in §R are **not yet implemented**.
+  **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
+  and v0.2.0 remain unchanged, released product capabilities; do not start
+  AKS/EKS-specific code, cloud cost intelligence, a database, SaaS
+  multi-tenancy, authentication, billing or LLM integration until a
+  milestone explicitly calls for it — v0.3.0 does not call for any of those.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
