@@ -10,4 +10,4 @@ export {
   SEVERITY_FILTER_OPTIONS,
   type WorkspaceFilterState,
 } from "./filtering";
-export { sortFindings, SORT_OPTIONS, type SortOption } from "./sorting";
+export { compareOrdinal, sortFindings, SORT_OPTIONS, type SortOption } from "./sorting";

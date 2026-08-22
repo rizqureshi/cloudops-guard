@@ -46,8 +46,13 @@ const SEVERITY_RANK: Readonly<Record<Severity, number>> = {
 
 type FindingComparator = (a: NormalizedFinding, b: NormalizedFinding) => number;
 
-/** Plain code-unit ordering -- never locale-aware. */
-function compareOrdinal(a: string, b: string): number {
+/**
+ * Plain code-unit ordering -- never locale-aware. Exported so other modules
+ * in this feature (e.g. `filtering.ts`'s dropdown-option ordering) share
+ * this one implementation instead of each reimplementing `<`/`>`/`===`
+ * comparison or falling back to `String.prototype.localeCompare`.
+ */
+export function compareOrdinal(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;

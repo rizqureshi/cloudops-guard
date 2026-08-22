@@ -7,28 +7,44 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3D &mdash; Kubernetes Interactive Demonstration
+## Current phase: 3E &mdash; GitLab Interactive Demonstration
 
-The static web foundation (Phase 3B) and the browser-side report-contract
+The static web foundation (Phase 3B), the browser-side report-contract
 layer under [`src/features/report-import/`](src/features/report-import/)
-(Phase 3C) are unchanged. Phase 3D adds the first interactive route,
-**`/demo/kubernetes`**: a deterministic synthetic Kubernetes report
-([`src/data/synthetic-kubernetes-report.json`](src/data/synthetic-kubernetes-report.json),
-covering all six implemented Kubernetes checks) is parsed at build time
-through the existing `parseKubernetesReport`, then passed to a reusable
-React report-workspace island under
-[`src/features/report-workspace/`](src/features/report-workspace/) that
-provides search, severity/category/resource-kind filtering, deterministic
-sorting, and keyboard-accessible finding details. `/demo/kubernetes`
-hydrates only that one island (`client:load`); `/` remains fully static
-with zero client-side hydration, as before. The following remain
+(Phase 3C), and the Kubernetes interactive demonstration at
+`/demo/kubernetes` (Phase 3D, closed) are unchanged. Phase 3E adds the
+second interactive route, **`/demo/gitlab`**: two deterministic synthetic
+GitLab reports for the same fictional project
+([`src/data/synthetic-gitlab-report-unprotected-branch.json`](src/data/synthetic-gitlab-report-unprotected-branch.json)
+and
+[`-protected-branch.json`](src/data/synthetic-gitlab-report-protected-branch.json),
+together covering all eleven implemented GitLab checks) are parsed at
+build time through the existing `parseGitLabReport`. Two reports exist,
+not one, because the production evaluator can never emit `GL-BR-001` (no
+protected-branch rule matches the default branch) in the same report as
+`GL-BR-002`/`GL-BR-003` (which both require a matching rule) -- one report
+asserting all three would misrepresent a real scan. A one-report-at-a-time
+scenario selector
+([`src/features/gitlab-demo/GitLabDemo.tsx`](src/features/gitlab-demo/GitLabDemo.tsx))
+switches between the two fixed, independent examples; this is explicitly
+not comparison functionality -- only one report is ever shown, nothing is
+diffed, and no finding is labeled new/persistent/resolved. The shared
+report-workspace island
+([`src/features/report-workspace/`](src/features/report-workspace/)) was
+deliberately generalized from accepting only a Kubernetes report to the
+full `NormalizedWebReport` union, so it now renders a correct GitLab
+target identity (platform, GitLab instance URL as plain text -- never a
+link, project ID, project path, default branch, generated timestamp)
+alongside its existing Kubernetes identity rendering. `/demo/gitlab`
+hydrates exactly one island (the selector plus workspace, `client:load`);
+`/demo/kubernetes` and `/` are unchanged. The following remain
 **intentionally absent**, and arrive in later phases (see the milestone
 document, §R):
 
-- The GitLab interactive demonstration.
 - The local report explorer, and the report-import UI it needs (file
   selection, drag-and-drop, `File`/`FileReader` usage).
-- Comparison logic, fingerprints, or the executive-summary view.
+- Comparison logic, fingerprints, target-compatibility checks, or the
+  executive-summary view.
 - The check catalogue and other product pages (`/checks`, `/roadmap`, `/learn`, etc.).
 - The contact/feedback endpoint(s) or Worker source.
 - Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
@@ -77,8 +93,10 @@ npm run preview
 - Astro, configured for **static output only** &mdash; no SSR adapter.
 - The official `@astrojs/react` integration provides React islands. `/`
   remains fully static with zero client-side hydration; `/demo/kubernetes`
-  hydrates exactly one island (the report-workspace) via `client:load`, and
-  no other route hydrates anything.
+  hydrates exactly one island (the report-workspace) via `client:load`;
+  `/demo/gitlab` hydrates exactly one island (the scenario selector plus
+  report-workspace, also generalized to render a GitLab report) via
+  `client:load`; no other route hydrates anything.
 - TypeScript runs under Astro's `strictest` preset.
 - All styling is project-owned CSS (custom properties in
   `src/styles/global.css`, plus a small workspace-specific stylesheet under
@@ -93,8 +111,8 @@ npm run preview
   [Vitest](https://vitest.dev/) for unit tests; both run against plain
   TypeScript/JSON in a Node test environment, with no DOM emulation and no
   network access.
-- The report-workspace island's component tests
-  (`tests/component/report-workspace/`) use
+- The report-workspace and gitlab-demo islands' component tests
+  (`tests/component/report-workspace/`, `tests/component/gitlab-demo/`) use
   [React Testing Library](https://testing-library.com/react),
   `@testing-library/user-event`, and `jsdom`. The jsdom environment is
   opted into per test file (a `// @vitest-environment jsdom` docblock),

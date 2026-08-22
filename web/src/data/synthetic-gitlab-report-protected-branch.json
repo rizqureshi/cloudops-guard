@@ -1,0 +1,86 @@
+{
+  "platform": "gitlab",
+  "gitlab_url": "https://gitlab.example.com",
+  "project_id": 9200,
+  "project_path": "platform/inventory-service",
+  "default_branch": "main",
+  "generated_at": "2026-07-15T08:00:00Z",
+  "findings": [
+    {
+      "check_id": "GL-BR-002",
+      "title": "Force-push is allowed on the default branch",
+      "severity": "high",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "ProtectedBranch",
+      "resource_name": "main",
+      "job_name": null,
+      "evidence": "Default branch: 'main'. Resolved effective force-push permission: allowed.",
+      "impact": "Force-push on the default branch can rewrite or destroy commit history, obscure prior changes, and break collaborators relying on that history -- undermining any audit trail.",
+      "recommendation": "Disable 'Allowed to force push' on every protected-branch rule matching the default branch.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
+      "check_id": "GL-BR-003",
+      "title": "Developers can push directly to the default branch",
+      "severity": "medium",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "ProtectedBranch",
+      "resource_name": "main",
+      "job_name": null,
+      "evidence": "Default branch: 'main'. The Developer role-based direct-push permission is granted on at least one matching protected-branch rule. This reports a permission grant, not proof that a developer has actually pushed directly to the default branch. User-specific, group-specific, deploy-key-specific, and custom-role grants were not evaluated.",
+      "impact": "Allowing direct pushes at the Developer role bypasses merge request review for a broad set of contributors, reducing change visibility.",
+      "recommendation": "Restrict default-branch push access to Maintainer or 'No one', and require changes via merge request.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
+      "check_id": "GL-SEC-003",
+      "title": "Pipeline-variable override permissions are more permissive than Maintainer",
+      "severity": "high",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "Project",
+      "resource_name": "platform/inventory-service",
+      "job_name": null,
+      "evidence": "The pipeline-variable minimum override role (ci_pipeline_variables_minimum_override_role) is 'developer'.",
+      "impact": "A role less privileged than Maintainer can override pipeline variables at trigger time, which may allow injecting values into unsafely interpolated scripts or overriding security-relevant variables -- an authorization bypass risk.",
+      "recommendation": "Change the minimum pipeline-variable override role to Maintainer or a more restrictive value.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
+      "check_id": "GL-COST-002",
+      "title": "Git clone depth is unlimited",
+      "severity": "low",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "Project",
+      "resource_name": "platform/inventory-service",
+      "job_name": null,
+      "evidence": "Configured project default Git clone depth: 0 (unlimited/full history).",
+      "impact": "When this project default applies, CI jobs that obtain repository sources may fetch full history, potentially increasing network transfer, checkout duration, runner usage, and compute cost -- particularly for large or long-lived repositories. This configuration does not prove that additional cost, transfer, or delay actually occurred. CloudOps Guard did not inspect pipelines, jobs, repository history, clone traffic, or runner usage. This finding evaluates only the project-level default Git clone depth. It does not inspect job-level or pipeline-level GIT_DEPTH variable overrides, which can set an effectively unlimited depth when the project default is bounded, or a bounded depth when the project default is unlimited.",
+      "recommendation": "Set a bounded positive project default Git clone depth appropriate for the project's branching, tagging, and history requirements. Unlimited history may be intentional and legitimate for work such as versioning or changelog generation across complete tag/history information.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
+      "check_id": "GL-CI-001",
+      "title": "CI job or service container image uses a mutable tag or no tag",
+      "severity": "high",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "CIService",
+      "resource_name": "dynamic image reference",
+      "job_name": "test",
+      "evidence": "The CI image reference is dynamic and could not be statically verified.",
+      "impact": "A dynamic, runtime-resolved image reference cannot be evaluated from the CI configuration alone, so its reproducibility, rollback safety, and supply-chain traceability cannot be verified. This does not mean the effective image is necessarily unpinned -- only that CloudOps Guard cannot determine that statically.",
+      "recommendation": "Replace or constrain the CI/CD variable expression so the effective image reference can be statically verified, rather than relying on a value resolved only at runtime.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "high": 3,
+    "medium": 1,
+    "low": 1
+  }
+}

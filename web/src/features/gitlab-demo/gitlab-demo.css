@@ -1,0 +1,43 @@
+/*
+  GitLab scenario-selector styles. Uses only the project-owned design
+  tokens from ../../styles/global.css (loaded once via BaseLayout) -- no UI
+  framework, no icon package, no remote font.
+*/
+
+.gitlab-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.gitlab-demo__selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.gitlab-demo__selector label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.gitlab-demo__selector select {
+  font: inherit;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  max-width: 28rem;
+}
+
+.gitlab-demo__selector-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}

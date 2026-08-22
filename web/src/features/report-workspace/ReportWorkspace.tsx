@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { NormalizedKubernetesFinding, NormalizedKubernetesReport } from "../report-import";
+import type { NormalizedFinding, NormalizedWebReport } from "../report-import";
 import {
   DEFAULT_FILTER_STATE,
   distinctCategories,
@@ -14,7 +14,7 @@ import "./report-workspace.css";
 import { sortFindings, SORT_OPTIONS, type SortOption } from "./sorting";
 
 interface ReportWorkspaceProps {
-  readonly report: NormalizedKubernetesReport;
+  readonly report: NormalizedWebReport;
 }
 
 const SORT_LABELS: Readonly<Record<SortOption, string>> = {
@@ -44,13 +44,18 @@ function capitalize(value: string): string {
  * clone or recreate finding objects -- so every finding encountered while
  * rendering a filtered/sorted view is reference-identical to one entry in
  * `report.findings`, and the key it's given here remains stable no matter
- * how the user filters or re-sorts.
+ * how the user filters or re-sorts. Generalized over `NormalizedFinding`
+ * (the Kubernetes/GitLab union) rather than the Kubernetes-only finding
+ * type, since Phase 3E generalized `ReportWorkspace` to render both
+ * platforms; the property (stable per-occurrence, reference-keyed, O(1)
+ * lookup, no deduplication) is unaffected by which platform's findings are
+ * passed in.
  */
 function useFindingKeys(
-  findings: readonly NormalizedKubernetesFinding[],
-): ReadonlyMap<NormalizedKubernetesFinding, number> {
+  findings: readonly NormalizedFinding[],
+): ReadonlyMap<NormalizedFinding, number> {
   return useMemo(() => {
-    const keys = new Map<NormalizedKubernetesFinding, number>();
+    const keys = new Map<NormalizedFinding, number>();
     findings.forEach((finding, index) => {
       keys.set(finding, index);
     });
@@ -63,31 +68,38 @@ function useFindingKeys(
  * only (`useState`/`useMemo`) -- no `localStorage`/`sessionStorage`/
  * IndexedDB/cookies/service worker/URL persistence, and no `fetch`/
  * `XMLHttpRequest`/`WebSocket`/`sendBeacon` is ever called here. `report`
- * is already a validated `NormalizedKubernetesReport` (see
+ * is already a validated `NormalizedWebReport` (see
  * `../report-import/parsers.ts`) -- this component only filters, sorts,
  * and displays it.
  *
- * Narrowed to `NormalizedKubernetesReport` for Phase 3D: this component
- * does not yet render a GitLab report's target identity correctly (it
- * would need `gitlabUrl`/`projectId`/`projectPath`/`defaultBranch`, not
- * `clusterContext`/`namespaceFilter`), so it must not claim to accept the
- * full `NormalizedWebReport` union until a future GitLab phase actually
- * implements that rendering path. The `report-workspace` feature folder
- * may still be generalized deliberately when that phase arrives.
+ * Generalized to the full `NormalizedWebReport` union in Phase 3E: Phase
+ * 3D deliberately narrowed this prop to `NormalizedKubernetesReport`
+ * because, at the time, the component only rendered a Kubernetes target
+ * identity correctly. Phase 3E adds a GitLab-specific identity branch (see
+ * the `report.platform === "gitlab"` block below) so both discriminated
+ * report variants now render their own correct target fields -- this is a
+ * deliberate generalization, not a claim that rendering "already worked"
+ * for GitLab before this phase.
  */
 export function ReportWorkspace({ report }: ReportWorkspaceProps) {
   const [filters, setFilters] = useState<WorkspaceFilterState>(DEFAULT_FILTER_STATE);
   const [sortOption, setSortOption] = useState<SortOption>("severity");
 
-  const findingKeys = useFindingKeys(report.findings);
+  // Widening `report.findings` (typed per-branch by the discriminated union)
+  // to the flat `NormalizedFinding` union once here lets every helper below
+  // work uniformly across both platforms; readonly arrays are covariant, so
+  // this is a safe upcast, not a runtime transformation.
+  const findings: readonly NormalizedFinding[] = report.findings;
 
-  const resourceKindOptions = useMemo(() => distinctResourceKinds(report.findings), [report.findings]);
-  const categoryOptions = useMemo(() => distinctCategories(report.findings), [report.findings]);
+  const findingKeys = useFindingKeys(findings);
 
-  const filtered = useMemo(() => filterFindings(report.findings, filters), [report.findings, filters]);
+  const resourceKindOptions = useMemo(() => distinctResourceKinds(findings), [findings]);
+  const categoryOptions = useMemo(() => distinctCategories(findings), [findings]);
+
+  const filtered = useMemo(() => filterFindings(findings, filters), [findings, filters]);
   const sorted = useMemo(() => sortFindings(filtered, sortOption), [filtered, sortOption]);
 
-  const totalCount = report.findings.length;
+  const totalCount = findings.length;
   const filteredCount = sorted.length;
 
   function clearFilters(): void {
@@ -99,17 +111,45 @@ export function ReportWorkspace({ report }: ReportWorkspaceProps) {
       <p className="status-label status-label--neutral report-workspace__badge">Synthetic demonstration</p>
 
       <div className="report-workspace__identity">
-        <p>
-          <span className="report-workspace__identity-label">Platform</span> Kubernetes
-        </p>
-        <p>
-          <span className="report-workspace__identity-label">Cluster context</span>{" "}
-          {report.target.clusterContext}
-        </p>
-        <p>
-          <span className="report-workspace__identity-label">Namespace filter</span>{" "}
-          {report.target.namespaceFilter === null ? "All namespaces" : report.target.namespaceFilter}
-        </p>
+        {report.platform === "kubernetes" ? (
+          <>
+            <p>
+              <span className="report-workspace__identity-label">Platform</span> Kubernetes
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Cluster context</span>{" "}
+              {report.target.clusterContext}
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Namespace filter</span>{" "}
+              {report.target.namespaceFilter === null ? "All namespaces" : report.target.namespaceFilter}
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              <span className="report-workspace__identity-label">Platform</span> GitLab
+            </p>
+            {/* Rendered as plain text, never a link/navigation target -- the
+                GitLab URL is untrusted, report-derived display data (see
+                CLAUDE.md, "web application invariants"). */}
+            <p>
+              <span className="report-workspace__identity-label">GitLab instance URL</span>{" "}
+              {report.target.gitlabUrl}
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Project ID</span> {report.target.projectId}
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Project path</span>{" "}
+              {report.target.projectPath}
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Default branch</span>{" "}
+              {report.target.defaultBranch}
+            </p>
+          </>
+        )}
         <p>
           <span className="report-workspace__identity-label">Report generated</span>{" "}
           <time dateTime={report.generatedAt}>{report.generatedAt}</time>

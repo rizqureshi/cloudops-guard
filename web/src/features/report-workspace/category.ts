@@ -6,20 +6,32 @@
  * changed to accommodate the web UI), so category is always recomputed from
  * `checkId` rather than trusted from report data.
  *
- * Only the currently implemented Kubernetes check families are mapped here,
- * per Phase 3D's scope. An unrecognized prefix (e.g. a future GitLab
- * `GL-*` check ID, once Phase 3E wires up the GitLab demo) falls back to
- * "Other" rather than throwing, so this function stays safe to call on any
- * finding without the workspace needing to know which platform it belongs
- * to.
+ * Covers every currently implemented Kubernetes (`K8S-*`) and GitLab
+ * (`GL-*`) check family. An unrecognized prefix falls back to "Other"
+ * rather than throwing, so this function stays safe to call on any finding
+ * without the workspace needing to know which platform it belongs to.
  */
 
-export type FindingCategory = "Resource management" | "Image security" | "Reliability" | "Other";
+export type FindingCategory =
+  | "Resource management"
+  | "Image security"
+  | "Reliability"
+  | "Branch protection"
+  | "Merge safeguards"
+  | "Security"
+  | "Cost efficiency"
+  | "Other";
 
 const CATEGORY_BY_PREFIX: ReadonlyArray<readonly [prefix: string, category: FindingCategory]> = [
   ["K8S-RES-", "Resource management"],
   ["K8S-IMG-", "Image security"],
   ["K8S-REL-", "Reliability"],
+  ["GL-BR-", "Branch protection"],
+  ["GL-MR-", "Merge safeguards"],
+  ["GL-SEC-", "Security"],
+  ["GL-COST-", "Cost efficiency"],
+  ["GL-REL-", "Reliability"],
+  ["GL-CI-", "Image security"],
 ];
 
 export function deriveCategory(checkId: string): FindingCategory {

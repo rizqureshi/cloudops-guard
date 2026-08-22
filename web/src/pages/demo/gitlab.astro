@@ -1,0 +1,61 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { GitLabDemo, type GitLabScenario } from "../../features/gitlab-demo";
+import { parseGitLabReport } from "../../features/report-import";
+import unprotectedBranchReportRaw from "../../data/synthetic-gitlab-report-unprotected-branch.json";
+import protectedBranchReportRaw from "../../data/synthetic-gitlab-report-protected-branch.json";
+
+// Parsed at build time through the same untrusted-input validation path a
+// real imported report would go through (see ../../features/report-import).
+// If either synthetic fixture ever drifted from the released GitLab report
+// contract, or its supplied summary stopped matching its findings, this
+// call would throw and the build would fail loudly -- exactly the intended
+// outcome (see docs/milestones/v0.3.0-interactive-web-demo.md, section H:
+// "A synthetic report that the site's own parser would reject is a bug").
+const unprotectedBranchReport = parseGitLabReport(unprotectedBranchReportRaw);
+const protectedBranchReport = parseGitLabReport(protectedBranchReportRaw);
+
+// Two independent, internally consistent scan states for the same
+// fictional project -- not a comparison. The production evaluator can
+// never emit GL-BR-001 (no protected-branch rule matches the default
+// branch) in the same report as GL-BR-002/GL-BR-003 (which both require a
+// matching rule), so one report showing all three would misrepresent a
+// real scan. Scenario ids are fixed, application-defined strings, never
+// derived from report content.
+const scenarios: readonly [GitLabScenario, GitLabScenario] = [
+  {
+    id: "unprotected-default-branch",
+    label: "Scenario A — default branch unprotected",
+    report: unprotectedBranchReport,
+  },
+  {
+    id: "protected-with-permissive-rules",
+    label: "Scenario B — default branch protected, but with permissive rules",
+    report: protectedBranchReport,
+  },
+];
+---
+
+<BaseLayout
+  title="GitLab demo — CloudOps Guard"
+  description="An interactive, synthetic-data demonstration of a CloudOps Guard GitLab CI/CD audit -- search, filter, and inspect example findings entirely in your browser."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Interactive demonstration</p>
+      <h1>GitLab CI/CD audit demo</h1>
+      <p>
+        This page shows what a CloudOps Guard GitLab CI/CD audit finds, using two fixed,
+        synthetic example reports for the same fictional project &mdash; not a live GitLab
+        instance. No GitLab instance, project, or access token is contacted or requested by
+        this page. Everything below runs entirely in your browser.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container">
+      <GitLabDemo scenarios={scenarios} client:load />
+    </div>
+  </section>
+</BaseLayout>

@@ -68,15 +68,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         their own browser, with the file never uploaded anywhere.
       </p>
       <p>
-        The interactive <strong>Kubernetes demonstration</strong> is live below, using
-        a fixed synthetic example report &mdash; search, filter, sort, and inspect
-        findings entirely in your browser. The GitLab demonstration, report
-        comparison, an executive summary, and the local report explorer (for opening
-        a <code>report.json</code> file the CLI already produced, also never
-        uploaded anywhere) all arrive in later implementation phases.
+        Two interactive demonstrations are now implemented, each using fixed synthetic
+        example reports &mdash; search, filter, sort, and inspect findings entirely
+        in your browser. Report comparison, an executive summary, a searchable check
+        catalogue, other product pages, a contact form, and the local report explorer
+        (for opening a <code>report.json</code> file the CLI already produced, also
+        never uploaded anywhere) all arrive in later implementation phases. This site
+        has not been deployed, released, or published.
       </p>
-      <p>
+      <p class="index-cta-group">
         <a class="cta" href="/demo/kubernetes">Explore Kubernetes &rarr;</a>
+        <a class="cta" href="/demo/gitlab">Explore GitLab &rarr;</a>
       </p>
     </div>
   </section>
@@ -113,13 +115,14 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="container container--narrow">
       <h2 id="roadmap-heading">What comes next</h2>
       <p>
-        The interactive <a href="/demo/kubernetes">Kubernetes demonstration</a> is
-        the first of these to ship. Later phases add: an interactive GitLab
-        demonstration using synthetic data, browser-side report comparison and an
-        executive summary view, a local report explorer that reads a
-        <code>report.json</code> file you choose, a searchable catalogue of every
-        implemented check, and a separate, isolated contact form. None of these
-        other pieces exist on this site yet.
+        The interactive <a href="/demo/kubernetes">Kubernetes</a> and
+        <a href="/demo/gitlab">GitLab</a> demonstrations are the first of these to
+        be implemented. Later phases add: browser-side report comparison and an executive
+        summary view, a local report explorer that reads a <code>report.json</code>
+        file you choose, a searchable catalogue of every implemented check, other
+        product pages, and a separate, isolated contact form. None of these other
+        pieces exist on this site yet, and this site has not been deployed,
+        released, or published.
       </p>
     </div>
   </section>
@@ -139,6 +142,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   .section__intro {
     color: var(--color-text-muted);
     max-width: 42rem;
+  }
+
+  .index-cta-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
   }
 
   .card-grid {

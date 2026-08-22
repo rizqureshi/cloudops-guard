@@ -6,6 +6,7 @@
 
 import type { NormalizedFinding, Severity } from "../report-import";
 import { deriveCategory, type FindingCategory } from "./category";
+import { compareOrdinal } from "./sorting";
 
 export const SEVERITY_FILTER_OPTIONS: readonly Severity[] = ["critical", "high", "medium", "low"];
 
@@ -85,14 +86,18 @@ export function filterFindings<T extends NormalizedFinding>(
   return findings.filter((finding) => matchesFilters(finding, filters));
 }
 
-/** Distinct resource kinds present in `findings`, in a stable sorted order. */
+/**
+ * Distinct resource kinds present in `findings`, in a stable, deterministic
+ * order. Uses `compareOrdinal` (plain code-unit `<`/`>`/`===`), not
+ * `String.prototype.localeCompare` -- locale-aware comparison is
+ * environment-dependent and not guaranteed to produce the same order
+ * everywhere (see sorting.ts).
+ */
 export function distinctResourceKinds(findings: readonly NormalizedFinding[]): string[] {
-  return Array.from(new Set(findings.map((f) => f.resourceKind))).sort((a, b) => a.localeCompare(b));
+  return Array.from(new Set(findings.map((f) => f.resourceKind))).sort(compareOrdinal);
 }
 
-/** Distinct categories present in `findings`, in a stable sorted order. */
+/** Distinct categories present in `findings`, in a stable, deterministic order. */
 export function distinctCategories(findings: readonly NormalizedFinding[]): FindingCategory[] {
-  return Array.from(new Set(findings.map((f) => deriveCategory(f.checkId)))).sort((a, b) =>
-    a.localeCompare(b),
-  );
+  return Array.from(new Set(findings.map((f) => deriveCategory(f.checkId)))).sort(compareOrdinal);
 }
