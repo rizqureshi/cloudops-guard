@@ -171,6 +171,18 @@ code {
   max-width: var(--container-wide);
 }
 
+/* Shared vertical page-section rhythm, reused across pages (e.g. the
+   landing page and the Kubernetes/GitLab demo pages) rather than
+   redefined per page. */
+.section {
+  padding-block: var(--space-xl);
+}
+
+.section--muted {
+  background: var(--color-surface);
+  border-block: 1px solid var(--color-border);
+}
+
 /* --------------------------------------------------------------------------
    Accessibility: focus and skip link
    -------------------------------------------------------------------------- */
@@ -247,6 +259,27 @@ code {
   color: var(--color-text-muted);
   background: var(--color-surface);
   border-color: var(--color-border);
+}
+
+/* --------------------------------------------------------------------------
+   Call-to-action links
+   -------------------------------------------------------------------------- */
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  padding: var(--space-2xs) var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--color-brand-600);
+  color: var(--color-text-on-brand);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  transition: background-color var(--transition-fast) var(--transition-easing);
+}
+
+.cta:hover {
+  background: var(--color-brand-700);
 }
 
 /* --------------------------------------------------------------------------

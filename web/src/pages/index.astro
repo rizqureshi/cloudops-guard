@@ -68,13 +68,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         their own browser, with the file never uploaded anywhere.
       </p>
       <p>
-        <strong>What you're looking at is the very first step:</strong> a static web
-        foundation with no interactive demonstration and no local report explorer
-        yet. The browser-side code that reads and validates a
-        <code>report.json</code> file now exists and is tested, but it isn't
-        connected to anything you can use here yet. The Kubernetes demo, the
-        GitLab demo, report comparison, and the local report explorer itself
-        all arrive in later implementation phases.
+        The interactive <strong>Kubernetes demonstration</strong> is live below, using
+        a fixed synthetic example report &mdash; search, filter, sort, and inspect
+        findings entirely in your browser. The GitLab demonstration, report
+        comparison, an executive summary, and the local report explorer (for opening
+        a <code>report.json</code> file the CLI already produced, also never
+        uploaded anywhere) all arrive in later implementation phases.
+      </p>
+      <p>
+        <a class="cta" href="/demo/kubernetes">Explore Kubernetes &rarr;</a>
       </p>
     </div>
   </section>
@@ -111,12 +113,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="container container--narrow">
       <h2 id="roadmap-heading">What comes next</h2>
       <p>
-        Later phases of this milestone add: an interactive Kubernetes demonstration
-        and an interactive GitLab demonstration using synthetic data, browser-side
-        report comparison and an executive summary view, a local report explorer
-        that reads a <code>report.json</code> file you choose, a searchable catalogue
-        of every implemented check, and a separate, isolated contact form. None of
-        these exist on this site yet.
+        The interactive <a href="/demo/kubernetes">Kubernetes demonstration</a> is
+        the first of these to ship. Later phases add: an interactive GitLab
+        demonstration using synthetic data, browser-side report comparison and an
+        executive summary view, a local report explorer that reads a
+        <code>report.json</code> file you choose, a searchable catalogue of every
+        implemented check, and a separate, isolated contact form. None of these
+        other pieces exist on this site yet.
       </p>
     </div>
   </section>
@@ -131,15 +134,6 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     font-size: var(--font-size-md);
     color: var(--color-text-muted);
     max-width: 38rem;
-  }
-
-  .section {
-    padding-block: var(--space-xl);
-  }
-
-  .section--muted {
-    background: var(--color-surface);
-    border-block: 1px solid var(--color-border);
   }
 
   .section__intro {

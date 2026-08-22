@@ -59,23 +59,35 @@ regardless of which milestone is currently in progress.
   header/footer layout, one static page at `/`) and a validation-only
   `web-ci.yml` (type check, lint, unit tests, build — never deploys). **The
   web foundation is static**, with zero client-side hydration on its one
-  page. **Phase 3C has introduced the browser-side report-contract layer**
+  page. **Phase 3C introduced the browser-side report-contract layer**
   under `web/src/features/report-import/`: strict Zod schemas mirroring the
   released Kubernetes and GitLab `report.json` contracts,
   `parseKubernetesReport`/`parseGitLabReport`/`parseReport`, a normalized
   `NormalizedWebReport` representation, deterministic severity-summary
   recomputation, and sanitized validation errors, covered by Vitest unit
-  tests that `web-ci.yml` now runs. **This schema/adapter layer is not yet
-  exposed through any user interface** — there is no report-import UI, no
-  file selection, and no rendering of a parsed report anywhere on the site.
-  Synthetic Kubernetes/GitLab demonstration data, the local report explorer,
-  comparison logic, the executive summary, the check catalogue and other
-  product pages, the contact/feedback endpoint(s), any Cloudflare/deployment
-  configuration, and every later phase in §R are **not yet implemented**.
-  **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
-  and v0.2.0 remain unchanged, released product capabilities; do not start
-  AKS/EKS-specific code, cloud cost intelligence, a database, SaaS
-  multi-tenancy, authentication, billing or LLM integration until a
+  tests that `web-ci.yml` runs. **Phase 3C is closed**, on commit
+  `15be4a873a4e4d149022d1f07f23f43d541b2b84` (`feat(web): add report schema
+  adapters`), for which both `CI` (run `32535066964`) and `Web CI` (run
+  `32535066959`) succeeded. **Phase 3D has implemented the Kubernetes
+  single-report interactive demonstration** at `/demo/kubernetes`: a
+  deterministic synthetic Kubernetes report covering all six implemented
+  checks (`web/src/data/synthetic-kubernetes-report.json`), parsed at build
+  time through the existing `parseKubernetesReport`, and a reusable React
+  report-workspace island (`web/src/features/report-workspace/`) providing
+  search, severity/category/resource-kind filtering, deterministic sorting,
+  and keyboard-accessible finding details — hydrated as the page's only
+  interactive island (`client:load`), with the rest of the page remaining
+  static. **Phase 3D is not yet closed**: it requires independent ZIP
+  review and successful `CI`/`Web CI` runs against the commit that will be
+  created once this work is approved. GitLab demonstration data, the local
+  report explorer, comparison logic, the executive summary, the check
+  catalogue and other product pages, the contact/feedback endpoint(s), any
+  Worker endpoint, and any Cloudflare/deployment configuration remain **not
+  yet implemented**. **Nothing has been deployed, released, or published
+  for v0.3.0.** v0.1.0 and v0.2.0 remain unchanged, released product
+  capabilities; do not start AKS/EKS-specific code, cloud cost intelligence,
+  a database, SaaS multi-tenancy, authentication, billing or LLM integration
+  until a
   milestone explicitly calls for it — v0.3.0 does not call for any of those.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.

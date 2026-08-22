@@ -1,9 +1,9 @@
 ---
-// Minimal header for the Phase 3B foundation: only the "/" route exists, so
-// there is deliberately no navigation to unimplemented routes (§D routes
-// such as /demo/kubernetes, /explorer, /checks, etc. arrive in later
-// phases). A text-based wordmark stands in for a logo -- no external image
-// or font is loaded.
+// Minimal header. As of Phase 3D, "/" and "/demo/kubernetes" are the only
+// implemented routes, so navigation links to exactly those two -- there is
+// deliberately no link to any other §D route (/demo/gitlab, /explorer,
+// /checks, etc.), which remain unimplemented. A text-based wordmark stands
+// in for a logo -- no external image or font is loaded.
 ---
 
 <header class="site-header">
@@ -12,9 +12,9 @@
       <span class="site-header__mark" aria-hidden="true">CG</span>
       <span class="site-header__name">CloudOps&nbsp;Guard</span>
     </a>
-    <p class="site-header__state">
-      Web foundation preview &mdash; interactive demos not yet available
-    </p>
+    <nav class="site-header__nav" aria-label="Primary">
+      <a href="/demo/kubernetes">Explore Kubernetes</a>
+    </nav>
   </div>
 </header>
 
@@ -35,7 +35,7 @@
   }
 
   .site-header__wordmark,
-  .site-header__state {
+  .site-header__nav {
     min-width: 0;
   }
 
@@ -67,9 +67,14 @@
     letter-spacing: 0.02em;
   }
 
-  .site-header__state {
-    margin: 0;
+  .site-header__nav a {
     font-size: var(--font-size-sm);
-    color: var(--color-text-muted);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-brand-600);
+    text-decoration: none;
+  }
+
+  .site-header__nav a:hover {
+    text-decoration: underline;
   }
 </style>

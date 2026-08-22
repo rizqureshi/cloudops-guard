@@ -1,0 +1,39 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { ReportWorkspace } from "../../features/report-workspace";
+import { parseKubernetesReport } from "../../features/report-import";
+import syntheticKubernetesReportRaw from "../../data/synthetic-kubernetes-report.json";
+
+// Parsed at build time through the same untrusted-input validation path a
+// real imported report would go through (see ../../features/report-import).
+// If this synthetic fixture ever drifted from the released Kubernetes
+// report contract, this call would throw and the build would fail loudly
+// -- exactly the intended outcome (see docs/milestones/
+// v0.3.0-interactive-web-demo.md, section H: "A synthetic report that the
+// site's own parser would reject is a bug").
+const report = parseKubernetesReport(syntheticKubernetesReportRaw);
+---
+
+<BaseLayout
+  title="Kubernetes demo — CloudOps Guard"
+  description="An interactive, synthetic-data demonstration of a CloudOps Guard Kubernetes audit -- search, filter, and inspect example findings entirely in your browser."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Interactive demonstration</p>
+      <h1>Kubernetes audit demo</h1>
+      <p>
+        This page shows what a CloudOps Guard Kubernetes audit finds, using a fixed,
+        synthetic example report &mdash; not a live cluster. No Kubernetes cluster,
+        kubeconfig, or credential is contacted or requested by this page. Everything
+        below runs entirely in your browser.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container">
+      <ReportWorkspace report={report} client:load />
+    </div>
+  </section>
+</BaseLayout>

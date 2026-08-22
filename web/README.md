@@ -7,34 +7,32 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3C &mdash; Report Schemas and Browser Adapters
+## Current phase: 3D &mdash; Kubernetes Interactive Demonstration
 
-The static web foundation from Phase 3B (the Astro/React/TypeScript project
-skeleton, the project-owned CSS design-token system, a shared layout with
-header/footer, and one real page at `/`) is unchanged. Phase 3C adds the
-browser-side report-contract layer under
-[`src/features/report-import/`](src/features/report-import/): strict Zod
-schemas mirroring the released Kubernetes and GitLab `report.json` contracts,
-`parseKubernetesReport`/`parseGitLabReport`/`parseReport`, a normalized
-`NormalizedWebReport` representation, deterministic severity-summary
-recomputation, and sanitized validation errors &mdash; covered by Vitest unit
-tests run in CI. **None of this is exposed through a user interface yet**:
-there is no report-import UI, no drag-and-drop, no file input, and no
-rendering of a parsed report anywhere on the site. The following remain
+The static web foundation (Phase 3B) and the browser-side report-contract
+layer under [`src/features/report-import/`](src/features/report-import/)
+(Phase 3C) are unchanged. Phase 3D adds the first interactive route,
+**`/demo/kubernetes`**: a deterministic synthetic Kubernetes report
+([`src/data/synthetic-kubernetes-report.json`](src/data/synthetic-kubernetes-report.json),
+covering all six implemented Kubernetes checks) is parsed at build time
+through the existing `parseKubernetesReport`, then passed to a reusable
+React report-workspace island under
+[`src/features/report-workspace/`](src/features/report-workspace/) that
+provides search, severity/category/resource-kind filtering, deterministic
+sorting, and keyboard-accessible finding details. `/demo/kubernetes`
+hydrates only that one island (`client:load`); `/` remains fully static
+with zero client-side hydration, as before. The following remain
 **intentionally absent**, and arrive in later phases (see the milestone
 document, §R):
 
-- The report-import UI (file selection, drag-and-drop, `File`/`FileReader`
-  usage).
-- Synthetic Kubernetes/GitLab demonstration data or demo pages.
-- The local report explorer.
+- The GitLab interactive demonstration.
+- The local report explorer, and the report-import UI it needs (file
+  selection, drag-and-drop, `File`/`FileReader` usage).
 - Comparison logic, fingerprints, or the executive-summary view.
 - The check catalogue and other product pages (`/checks`, `/roadmap`, `/learn`, etc.).
 - The contact/feedback endpoint(s) or Worker source.
 - Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
   workflow.
-
-The `/` page itself remains fully static, with zero client-side hydration.
 
 **No production deployment is authorized in this phase or by anything in this
 directory.** Deployment requires a separate, explicit, later authorization (see the
@@ -77,17 +75,28 @@ npm run preview
 ## Design notes
 
 - Astro, configured for **static output only** &mdash; no SSR adapter.
-- The official `@astrojs/react` integration is installed and configured for later
-  React islands (the interactive report workspace, comparison view, etc.), but this
-  phase's one page is fully static with zero client-side hydration.
+- The official `@astrojs/react` integration provides React islands. `/`
+  remains fully static with zero client-side hydration; `/demo/kubernetes`
+  hydrates exactly one island (the report-workspace) via `client:load`, and
+  no other route hydrates anything.
 - TypeScript runs under Astro's `strictest` preset.
 - All styling is project-owned CSS (custom properties in
-  `src/styles/global.css`) &mdash; no UI framework, no CSS framework, no external font
-  or icon service.
+  `src/styles/global.css`, plus a small workspace-specific stylesheet under
+  `src/features/report-workspace/`) &mdash; no UI framework, no CSS framework,
+  no icon package, no external font or icon service.
 - No analytics, telemetry, session replay, advertising, or third-party runtime
-  script is present anywhere in this phase.
+  script is present anywhere in this phase. The report-workspace island keeps
+  all state in React memory only (no `localStorage`/`sessionStorage`/
+  IndexedDB/cookies) and never calls `fetch`/`XMLHttpRequest`/`WebSocket`.
 - The report-import layer (`src/features/report-import/`) uses
   [Zod](https://zod.dev/) for runtime schema validation and
   [Vitest](https://vitest.dev/) for unit tests; both run against plain
   TypeScript/JSON in a Node test environment, with no DOM emulation and no
   network access.
+- The report-workspace island's component tests
+  (`tests/component/report-workspace/`) use
+  [React Testing Library](https://testing-library.com/react),
+  `@testing-library/user-event`, and `jsdom`. The jsdom environment is
+  opted into per test file (a `// @vitest-environment jsdom` docblock),
+  not project-wide, so the plain-TypeScript unit tests keep running under
+  the faster, DOM-free Node environment.

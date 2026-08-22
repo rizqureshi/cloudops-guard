@@ -1,0 +1,212 @@
+/*
+  Report workspace styles. Uses only the project-owned design tokens from
+  ../../styles/global.css (loaded once via BaseLayout) -- no UI framework,
+  no icon package, no remote font.
+*/
+
+.report-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.report-workspace__badge {
+  align-self: flex-start;
+}
+
+.report-workspace__identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+.report-workspace__identity p {
+  margin: 0;
+}
+
+.report-workspace__identity-label {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.report-workspace__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+.report-workspace__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-sm);
+  align-items: end;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.report-workspace__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.report-workspace__field label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.report-workspace__field input,
+.report-workspace__field select {
+  font: inherit;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 0;
+}
+
+.report-workspace__clear {
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast) var(--transition-easing);
+}
+
+.report-workspace__clear:hover {
+  background: var(--color-bg);
+}
+
+.report-workspace__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.report-workspace__empty {
+  margin: 0;
+  padding: var(--space-md);
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.report-workspace__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.finding-row {
+  margin: 0;
+}
+
+.finding-row__details {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.finding-row__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Hide the default disclosure triangle in browsers that render one, so the
+   custom indicator below is the one consistent affordance across
+   Chromium, Firefox, and WebKit -- `list-style: none` above suppresses
+   Firefox's (and modern Chromium's) list-item-based marker; this
+   pseudo-element suppresses older WebKit/Chromium's separate marker. */
+.finding-row__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A plain CSS border-triangle, not a glyph or icon asset, so it renders
+   pixel-identically everywhere with no font/asset dependency. It is purely
+   decorative -- `<summary>` already exposes native expanded/collapsed
+   state to assistive technology, and the icon itself is `aria-hidden`
+   (see FindingRow.tsx) so it is never announced as separate content. The
+   rotation transition is already neutralized under
+   `prefers-reduced-motion: reduce` by the global rule in
+   ../../styles/global.css -- the open/closed state itself still changes,
+   only the animation is skipped. */
+.finding-row__disclosure-icon {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0.32rem 0 0.32rem 0.42rem;
+  border-color: transparent transparent transparent var(--color-text-muted);
+  transition: transform var(--transition-fast) var(--transition-easing);
+}
+
+.finding-row__details[open] > .finding-row__summary .finding-row__disclosure-icon {
+  transform: rotate(90deg);
+}
+
+.finding-row__severity {
+  flex-shrink: 0;
+}
+
+.finding-row__check-id {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.finding-row__title {
+  font-weight: var(--font-weight-medium);
+}
+
+.finding-row__resource {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  flex-basis: 100%;
+}
+
+.finding-row__body {
+  padding: 0 var(--space-sm) var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.finding-row__detail-list {
+  margin: var(--space-sm) 0 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-3xs) var(--space-sm);
+}
+
+.finding-row__detail-list dt {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.finding-row__detail-list dd {
+  margin: 0;
+}
+
+@media (max-width: 40rem) {
+  .finding-row__detail-list {
+    grid-template-columns: 1fr;
+  }
+}
