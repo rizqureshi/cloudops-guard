@@ -35,6 +35,20 @@
       "audited_at": "2026-07-15T08:00:00Z"
     },
     {
+      "check_id": "GL-MR-001",
+      "title": "Successful pipelines are not required before merge",
+      "severity": "medium",
+      "project_path": "platform/inventory-service",
+      "resource_kind": "Project",
+      "resource_name": "platform/inventory-service",
+      "job_name": null,
+      "evidence": "The 'Pipelines must succeed' setting (only_allow_merge_if_pipeline_succeeds) is disabled.",
+      "impact": "Merge requests can be merged even when a pipeline fails, so any configured tests, builds, or security scans cannot reliably gate merges while this setting is disabled.",
+      "recommendation": "Enable 'Pipelines must succeed' in the project's merge request settings.",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
       "check_id": "GL-SEC-003",
       "title": "Pipeline-variable override permissions are more permissive than Maintainer",
       "severity": "high",
@@ -67,6 +81,20 @@
       "title": "CI job or service container image uses a mutable tag or no tag",
       "severity": "high",
       "project_path": "platform/inventory-service",
+      "resource_kind": "CIJob",
+      "resource_name": "registry.example.com/inventory-build/build:latest",
+      "job_name": "build",
+      "evidence": "CI job 'build' uses image 'registry.example.com/inventory-build/build:latest' (tag: latest).",
+      "impact": "A mutable tag such as 'latest', or no tag at all, means the exact image content used by this CI job may differ from what ran previously or what will run next time, undermining reproducibility, rollback safety, and supply-chain traceability. CI images also run with pipeline (and potentially CI job token) permissions, so an unverifiable image is a sharper risk here than an equivalent finding on an idle workload. A specific version tag is a meaningful improvement over 'latest', but a tag can still be overwritten and re-pushed in the registry -- it is not itself a guarantee of immutability.",
+      "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).",
+      "auto_remediable": false,
+      "audited_at": "2026-07-15T08:00:00Z"
+    },
+    {
+      "check_id": "GL-CI-001",
+      "title": "CI job or service container image uses a mutable tag or no tag",
+      "severity": "high",
+      "project_path": "platform/inventory-service",
       "resource_kind": "CIService",
       "resource_name": "dynamic image reference",
       "job_name": "test",
@@ -79,8 +107,8 @@
   ],
   "summary": {
     "critical": 0,
-    "high": 3,
-    "medium": 1,
+    "high": 4,
+    "medium": 2,
     "low": 1
   }
 }

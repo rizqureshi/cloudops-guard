@@ -163,6 +163,7 @@
   transform: rotate(90deg);
 }
 
+.finding-row__status,
 .finding-row__severity {
   flex-shrink: 0;
 }

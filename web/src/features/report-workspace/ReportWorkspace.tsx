@@ -1,26 +1,45 @@
 import { useMemo, useState } from "react";
 
-import type { NormalizedFinding, NormalizedWebReport } from "../report-import";
+import { COMPARISON_STATUS_ORDER, type ComparisonResult, type ComparisonStatus } from "../comparison/types";
+import type {
+  NormalizedFinding,
+  NormalizedGitLabTarget,
+  NormalizedKubernetesTarget,
+  NormalizedWebReport,
+} from "../report-import";
 import {
   DEFAULT_FILTER_STATE,
   distinctCategories,
   distinctResourceKinds,
-  filterFindings,
   SEVERITY_FILTER_OPTIONS,
   type WorkspaceFilterState,
 } from "./filtering";
 import { FindingRow } from "./FindingRow";
 import "./report-workspace.css";
-import { sortFindings, SORT_OPTIONS, type SortOption } from "./sorting";
+import { SORT_OPTIONS } from "./sorting";
+import {
+  buildSingleReportItems,
+  filterWorkspaceItems,
+  sortWorkspaceItems,
+  type WorkspaceItem,
+  type WorkspaceSortOption,
+} from "./workspaceItems";
 
-interface ReportWorkspaceProps {
-  readonly report: NormalizedWebReport;
-}
+export type ReportWorkspaceProps =
+  | { readonly mode: "single"; readonly report: NormalizedWebReport }
+  | { readonly mode: "comparison"; readonly comparison: ComparisonResult };
 
-const SORT_LABELS: Readonly<Record<SortOption, string>> = {
+const SORT_LABELS: Readonly<Record<WorkspaceSortOption, string>> = {
   severity: "Severity",
   checkId: "Check ID",
   resource: "Resource",
+  comparisonStatus: "Comparison status",
+};
+
+const COMPARISON_STATUS_LABELS: Readonly<Record<ComparisonStatus, string>> = {
+  new: "New",
+  persistent: "Persistent",
+  resolved: "Resolved",
 };
 
 function capitalize(value: string): string {
@@ -28,101 +47,142 @@ function capitalize(value: string): string {
 }
 
 /**
- * Assigns each finding a stable React key derived from its position in the
- * *original*, unfiltered `report.findings` array -- never from a
+ * The target identity to display: the report's own target in single mode,
+ * or the newer report's target in comparison mode (target compatibility
+ * between older/newer is already enforced before a `ComparisonResult` can
+ * exist -- see `../comparison/validation.ts` -- so either side would show
+ * the same fields). A real discriminated union, branched explicitly on
+ * `props.mode` and then on platform, so every field access below is
+ * narrowed by the type checker -- no `as` cast stands in for that.
+ */
+type DisplayTarget =
+  | { readonly platform: "kubernetes"; readonly target: NormalizedKubernetesTarget }
+  | { readonly platform: "gitlab"; readonly target: NormalizedGitLabTarget };
+
+function resolveDisplayTarget(props: ReportWorkspaceProps): DisplayTarget {
+  if (props.mode === "single") {
+    if (props.report.platform === "kubernetes") {
+      return { platform: "kubernetes", target: props.report.target };
+    }
+    return { platform: "gitlab", target: props.report.target };
+  }
+  if (props.comparison.platform === "kubernetes") {
+    return { platform: "kubernetes", target: props.comparison.newerReport.target };
+  }
+  return { platform: "gitlab", target: props.comparison.newerReport.target };
+}
+
+/**
+ * Assigns each workspace item a stable React key derived from its
+ * position in the *original*, unfiltered `items` array -- never from a
  * delimiter-joined combination of displayed fields, which would collide
  * for two otherwise-identical findings that differ only in a field not
- * included in the join (e.g. two findings for the same check ID, resource
- * kind, resource name, and container name, but in different namespaces).
- *
- * Built once per `findings` array via `useMemo`, as a `Map` keyed by
- * **object reference** (not content), giving O(1) lookups during render --
- * never `indexOf` (which would re-scan the array on every finding, every
- * render, an O(n^2) cost that matters as reports approach the 10,000-
- * finding limit). This works because `filterFindings`/`sortFindings` only
- * ever select and reorder references into the original array -- they never
- * clone or recreate finding objects -- so every finding encountered while
- * rendering a filtered/sorted view is reference-identical to one entry in
- * `report.findings`, and the key it's given here remains stable no matter
- * how the user filters or re-sorts. Generalized over `NormalizedFinding`
- * (the Kubernetes/GitLab union) rather than the Kubernetes-only finding
- * type, since Phase 3E generalized `ReportWorkspace` to render both
- * platforms; the property (stable per-occurrence, reference-keyed, O(1)
- * lookup, no deduplication) is unaffected by which platform's findings are
- * passed in.
+ * included in the join. Built once per `items` array via `useMemo`, as a
+ * `Map` keyed by the item's finding **object reference** (not content),
+ * giving O(1) lookups during render. This works because
+ * `filterWorkspaceItems`/`sortWorkspaceItems` only ever select and reorder
+ * items (and, within them, findings) that originate unchanged from
+ * `items` -- in comparison mode, each `ComparisonFindingResult` displays
+ * exactly one finding object, and multiset matching (see
+ * `../comparison/compare.ts`) never lets the same finding object appear in
+ * more than one result -- so every finding encountered while rendering a
+ * filtered/sorted view is reference-identical to one entry in `items`.
  */
-function useFindingKeys(
-  findings: readonly NormalizedFinding[],
-): ReadonlyMap<NormalizedFinding, number> {
+function useFindingKeys(items: readonly WorkspaceItem[]): ReadonlyMap<NormalizedFinding, number> {
   return useMemo(() => {
     const keys = new Map<NormalizedFinding, number>();
-    findings.forEach((finding, index) => {
-      keys.set(finding, index);
+    items.forEach((item, index) => {
+      keys.set(item.finding, index);
     });
     return keys;
-  }, [findings]);
+  }, [items]);
 }
 
 /**
  * The shared report-workspace island: everything is kept in React memory
  * only (`useState`/`useMemo`) -- no `localStorage`/`sessionStorage`/
  * IndexedDB/cookies/service worker/URL persistence, and no `fetch`/
- * `XMLHttpRequest`/`WebSocket`/`sendBeacon` is ever called here. `report`
- * is already a validated `NormalizedWebReport` (see
- * `../report-import/parsers.ts`) -- this component only filters, sorts,
- * and displays it.
+ * `XMLHttpRequest`/`WebSocket`/`sendBeacon` is ever called here.
  *
- * Generalized to the full `NormalizedWebReport` union in Phase 3E: Phase
- * 3D deliberately narrowed this prop to `NormalizedKubernetesReport`
- * because, at the time, the component only rendered a Kubernetes target
- * identity correctly. Phase 3E adds a GitLab-specific identity branch (see
- * the `report.platform === "gitlab"` block below) so both discriminated
- * report variants now render their own correct target fields -- this is a
- * deliberate generalization, not a claim that rendering "already worked"
- * for GitLab before this phase.
+ * Generalized in Phase 3F to also render a `ComparisonResult` (see
+ * `../comparison/`), in addition to a plain `NormalizedWebReport` (Phase
+ * 3E). The `mode` discriminant makes this an explicit, exhaustive choice
+ * at every call site, rather than inferring which shape was passed. In
+ * comparison mode: the severity-totals bar reflects the *newer* report
+ * only (see the milestone document, §Phase 3F -- resolved findings are
+ * never merged into it); a separate comparison-status-totals bar shows
+ * New/Persistent/Resolved counts; a comparison-status filter and a
+ * "Comparison status" sort option become available; and each finding row
+ * shows its status as a labeled badge. None of this renders in single
+ * mode, which is otherwise unchanged from Phase 3E.
  */
-export function ReportWorkspace({ report }: ReportWorkspaceProps) {
+export function ReportWorkspace(props: ReportWorkspaceProps) {
   const [filters, setFilters] = useState<WorkspaceFilterState>(DEFAULT_FILTER_STATE);
-  const [sortOption, setSortOption] = useState<SortOption>("severity");
+  const [sortOption, setSortOption] = useState<WorkspaceSortOption>("severity");
 
-  // Widening `report.findings` (typed per-branch by the discriminated union)
-  // to the flat `NormalizedFinding` union once here lets every helper below
-  // work uniformly across both platforms; readonly arrays are covariant, so
-  // this is a safe upcast, not a runtime transformation.
-  const findings: readonly NormalizedFinding[] = report.findings;
+  const isComparison = props.mode === "comparison";
 
-  const findingKeys = useFindingKeys(findings);
+  const items = useMemo<readonly WorkspaceItem[]>(() => {
+    if (props.mode === "single") {
+      // Widening `props.report.findings` (typed per-branch by the
+      // discriminated union) to the flat `NormalizedFinding` union once
+      // here, same technique as Phase 3E -- readonly arrays are
+      // covariant, so this is a safe upcast, not a runtime transformation.
+      const findings: readonly NormalizedFinding[] = props.report.findings;
+      return buildSingleReportItems(findings);
+    }
+    return props.comparison.results.map((result) => ({
+      finding: result.displayFinding,
+      status: result.status,
+    }));
+  }, [props]);
 
-  const resourceKindOptions = useMemo(() => distinctResourceKinds(findings), [findings]);
-  const categoryOptions = useMemo(() => distinctCategories(findings), [findings]);
+  const findingKeys = useFindingKeys(items);
 
-  const filtered = useMemo(() => filterFindings(findings, filters), [findings, filters]);
-  const sorted = useMemo(() => sortFindings(filtered, sortOption), [filtered, sortOption]);
+  const underlyingFindings = useMemo(() => items.map((item) => item.finding), [items]);
+  const resourceKindOptions = useMemo(() => distinctResourceKinds(underlyingFindings), [underlyingFindings]);
+  const categoryOptions = useMemo(() => distinctCategories(underlyingFindings), [underlyingFindings]);
 
-  const totalCount = findings.length;
+  const filtered = useMemo(() => filterWorkspaceItems(items, filters), [items, filters]);
+  const sorted = useMemo(() => sortWorkspaceItems(filtered, sortOption), [filtered, sortOption]);
+
+  const totalCount = items.length;
   const filteredCount = sorted.length;
+
+  const sortOptionsForMode: readonly WorkspaceSortOption[] = isComparison
+    ? [...SORT_OPTIONS, "comparisonStatus"]
+    : SORT_OPTIONS;
 
   function clearFilters(): void {
     setFilters(DEFAULT_FILTER_STATE);
   }
+
+  function handleSortChange(value: string): void {
+    setSortOption(value as WorkspaceSortOption);
+  }
+
+  const currentSeveritySummary = props.mode === "single" ? props.report.summary : props.comparison.newerReport.summary;
+  const displayTarget = resolveDisplayTarget(props);
 
   return (
     <div className="report-workspace">
       <p className="status-label status-label--neutral report-workspace__badge">Synthetic demonstration</p>
 
       <div className="report-workspace__identity">
-        {report.platform === "kubernetes" ? (
+        {displayTarget.platform === "kubernetes" ? (
           <>
             <p>
               <span className="report-workspace__identity-label">Platform</span> Kubernetes
             </p>
             <p>
               <span className="report-workspace__identity-label">Cluster context</span>{" "}
-              {report.target.clusterContext}
+              {displayTarget.target.clusterContext}
             </p>
             <p>
               <span className="report-workspace__identity-label">Namespace filter</span>{" "}
-              {report.target.namespaceFilter === null ? "All namespaces" : report.target.namespaceFilter}
+              {displayTarget.target.namespaceFilter === null
+                ? "All namespaces"
+                : displayTarget.target.namespaceFilter}
             </p>
           </>
         ) : (
@@ -135,34 +195,64 @@ export function ReportWorkspace({ report }: ReportWorkspaceProps) {
                 CLAUDE.md, "web application invariants"). */}
             <p>
               <span className="report-workspace__identity-label">GitLab instance URL</span>{" "}
-              {report.target.gitlabUrl}
+              {displayTarget.target.gitlabUrl}
             </p>
             <p>
-              <span className="report-workspace__identity-label">Project ID</span> {report.target.projectId}
+              <span className="report-workspace__identity-label">Project ID</span>{" "}
+              {displayTarget.target.projectId}
             </p>
             <p>
               <span className="report-workspace__identity-label">Project path</span>{" "}
-              {report.target.projectPath}
+              {displayTarget.target.projectPath}
             </p>
             <p>
               <span className="report-workspace__identity-label">Default branch</span>{" "}
-              {report.target.defaultBranch}
+              {displayTarget.target.defaultBranch}
             </p>
           </>
         )}
-        <p>
-          <span className="report-workspace__identity-label">Report generated</span>{" "}
-          <time dateTime={report.generatedAt}>{report.generatedAt}</time>
-        </p>
+        {props.mode === "single" ? (
+          <p>
+            <span className="report-workspace__identity-label">Report generated</span>{" "}
+            <time dateTime={props.report.generatedAt}>{props.report.generatedAt}</time>
+          </p>
+        ) : (
+          <>
+            <p>
+              <span className="report-workspace__identity-label">Earlier scan</span>{" "}
+              <time dateTime={props.comparison.olderReport.generatedAt}>
+                {props.comparison.olderReport.generatedAt}
+              </time>
+            </p>
+            <p>
+              <span className="report-workspace__identity-label">Later scan</span>{" "}
+              <time dateTime={props.comparison.newerReport.generatedAt}>
+                {props.comparison.newerReport.generatedAt}
+              </time>
+            </p>
+          </>
+        )}
       </div>
 
       <div className="report-workspace__summary" aria-label="Full report severity totals">
-        <span className="status-label status-label--critical">Critical {report.summary.critical}</span>
-        <span className="status-label status-label--high">High {report.summary.high}</span>
-        <span className="status-label status-label--medium">Medium {report.summary.medium}</span>
-        <span className="status-label status-label--low">Low {report.summary.low}</span>
-        <span className="status-label status-label--neutral">Total {report.summary.total}</span>
+        <span className="status-label status-label--critical">Critical {currentSeveritySummary.critical}</span>
+        <span className="status-label status-label--high">High {currentSeveritySummary.high}</span>
+        <span className="status-label status-label--medium">Medium {currentSeveritySummary.medium}</span>
+        <span className="status-label status-label--low">Low {currentSeveritySummary.low}</span>
+        <span className="status-label status-label--neutral">Total {currentSeveritySummary.total}</span>
       </div>
+
+      {isComparison ? (
+        <div className="report-workspace__summary" aria-label="Comparison status totals">
+          <span className="status-label status-label--new">New {props.comparison.statusTotals.new}</span>
+          <span className="status-label status-label--persistent">
+            Persistent {props.comparison.statusTotals.persistent}
+          </span>
+          <span className="status-label status-label--resolved">
+            Resolved {props.comparison.statusTotals.resolved}
+          </span>
+        </div>
+      ) : null}
 
       <form className="report-workspace__controls" onSubmit={(event) => event.preventDefault()}>
         <div className="report-workspace__field">
@@ -238,14 +328,33 @@ export function ReportWorkspace({ report }: ReportWorkspaceProps) {
           </select>
         </div>
 
+        {isComparison ? (
+          <div className="report-workspace__field">
+            <label htmlFor="comparison-status-filter">Comparison status</label>
+            <select
+              id="comparison-status-filter"
+              value={filters.comparisonStatus}
+              onChange={(event) =>
+                setFilters((previous) => ({
+                  ...previous,
+                  comparisonStatus: event.target.value as WorkspaceFilterState["comparisonStatus"],
+                }))
+              }
+            >
+              <option value="all">All statuses</option>
+              {COMPARISON_STATUS_ORDER.map((status) => (
+                <option key={status} value={status}>
+                  {COMPARISON_STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div className="report-workspace__field">
           <label htmlFor="sort-order">Sort by</label>
-          <select
-            id="sort-order"
-            value={sortOption}
-            onChange={(event) => setSortOption(event.target.value as SortOption)}
-          >
-            {SORT_OPTIONS.map((option) => (
+          <select id="sort-order" value={sortOption} onChange={(event) => handleSortChange(event.target.value)}>
+            {sortOptionsForMode.map((option) => (
               <option key={option} value={option}>
                 {SORT_LABELS[option]}
               </option>
@@ -268,14 +377,14 @@ export function ReportWorkspace({ report }: ReportWorkspaceProps) {
         </p>
       ) : (
         <ul className="report-workspace__results">
-          {sorted.map((finding) => {
-            // Every element of `sorted` originates from `report.findings`
-            // (filterFindings/sortFindings only select and reorder
-            // references, never clone), so this lookup always hits -- see
-            // useFindingKeys above. The non-null assertion reflects that
-            // proven invariant, not an unchecked assumption.
-            const key = findingKeys.get(finding)!;
-            return <FindingRow key={key} finding={finding} />;
+          {sorted.map((item) => {
+            // Every item's finding originates from `items` (filterWorkspaceItems/
+            // sortWorkspaceItems only select and reorder references, never
+            // clone), so this lookup always hits -- see useFindingKeys above.
+            // The non-null assertion reflects that proven invariant, not an
+            // unchecked assumption.
+            const key = findingKeys.get(item.finding)!;
+            return <FindingRow key={key} finding={item.finding} status={item.status} />;
           })}
         </ul>
       )}

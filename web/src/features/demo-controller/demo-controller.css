@@ -1,0 +1,71 @@
+/*
+  Shared demo-controller styles (scan-state selector + findings/executive-
+  summary view toggle). Uses only the project-owned design tokens from
+  ../../styles/global.css -- no UI framework, no icon package, no remote
+  font. Focus is not styled here: the global `:focus-visible` rule already
+  covers every native control this component renders.
+*/
+
+.demo-controller {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.demo-controller__mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.demo-controller__mode legend {
+  font-weight: var(--font-weight-medium);
+  padding: 0 var(--space-2xs) 0 0;
+}
+
+.demo-controller__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.demo-controller__mode-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.demo-controller__view-toggle {
+  display: inline-flex;
+  gap: var(--space-3xs);
+  align-self: flex-start;
+}
+
+.demo-controller__view-button {
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast) var(--transition-easing);
+}
+
+.demo-controller__view-button:hover {
+  background: var(--color-bg);
+}
+
+.demo-controller__view-button[aria-pressed="true"] {
+  background: var(--color-brand-600);
+  border-color: var(--color-brand-600);
+  color: var(--color-text-on-brand);
+}

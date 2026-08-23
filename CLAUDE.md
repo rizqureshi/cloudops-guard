@@ -80,27 +80,43 @@ regardless of which milestone is currently in progress.
   static. **Phase 3D is closed**, on commit
   `d94a86517b064ac816cdeaabe87eda675188326e`
   (`feat(web): add Kubernetes interactive demo`), for which both `CI` (run
-  `32540231252`) and `Web CI` (run `32540231247`) succeeded. **Phase 3E has
-  implemented the GitLab
-  interactive demonstration** at `/demo/gitlab`: two deterministic synthetic
-  GitLab reports for the same fictional project
+  `32540231252`) and `Web CI` (run `32540231247`) succeeded. **Phase 3E
+  implemented the GitLab interactive demonstration** at `/demo/gitlab`: two
+  deterministic synthetic GitLab reports for the same fictional project
   (`web/src/data/synthetic-gitlab-report-unprotected-branch.json` and
   `-protected-branch.json`), together covering all eleven implemented
   GitLab checks, parsed at build time through the existing
-  `parseGitLabReport`. The two reports exist because the production
-  evaluator can never emit `GL-BR-001` (no protected-branch rule matches
-  the default branch) in the same report as `GL-BR-002`/`GL-BR-003` (which
-  both require a matching rule) — one report containing all three would
-  misrepresent a real scan, so a one-report-at-a-time scenario selector
-  (`web/src/features/gitlab-demo/`) switches between the two fixed,
-  independent examples without comparing them. `ReportWorkspace` was
-  deliberately generalized from `NormalizedKubernetesReport` to the full
-  `NormalizedWebReport` union to render both platforms' target identities
-  correctly. **Phase 3E is not yet closed**: it requires independent ZIP
-  review and successful `CI`/`Web CI` runs against the commit that will be
-  created once this work is approved. The local report explorer, comparison
-  logic, the executive summary, the check catalogue and other product
-  pages, the contact/feedback endpoint(s), any Worker endpoint, and any
+  `parseGitLabReport`. **Phase 3E is closed**, on commit
+  `f50863479dc55c1d9ac535fde87a82501a957e78`
+  (`feat(web): add GitLab interactive demo`), for which both `CI` (run
+  `32600251672`) and `Web CI` (run `32600251664`) succeeded. **Phase 3F has
+  implemented comparison and the executive summary**: a browser-only
+  comparison feature (`web/src/features/comparison/`) that fingerprints
+  findings (never on severity/title/evidence/impact/recommendation/
+  auto-remediation/timestamp) and multiset-matches an older and a newer
+  report into new/persistent/resolved results, validating platform match,
+  a strictly later timestamp, and target-identity compatibility first; a
+  deterministic, non-AI-generated executive-summary feature
+  (`web/src/features/executive-summary/`) built as a pure function of
+  normalized/comparison data; and a shared `DemoController`
+  (`web/src/features/demo-controller/`) offering earlier-scan/later-scan/
+  compare-earlier-to-later modes plus a findings/executive-summary view
+  toggle on both `/demo/kubernetes` and `/demo/gitlab` — each still
+  hydrating exactly one island. The Kubernetes demo gained a second,
+  strictly later synthetic report
+  (`web/src/data/synthetic-kubernetes-report-later.json`); the GitLab
+  demo's existing two reports were adapted (a persistent `GL-MR-001`
+  finding added to the protected-branch state, and a second `GL-CI-001`
+  entry added there to demonstrate the documented image-reference-change
+  limitation) while preserving `GL-BR-001`'s isolation from
+  `GL-BR-002`/`GL-BR-003`. The former per-platform `gitlab-demo` feature
+  folder was removed in favor of the shared controller; `ReportWorkspace`
+  was further generalized to render either a single report or a
+  `ComparisonResult`. **Phase 3F is not yet closed**: it requires
+  independent ZIP review and successful `CI`/`Web CI` runs against the
+  commit that will be created once this work is approved. The local report
+  explorer, the check catalogue and other product pages, the
+  contact/feedback endpoint(s), any Worker endpoint, and any
   Cloudflare/deployment configuration remain **not yet implemented**.
   **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
   and v0.2.0 remain unchanged, released product capabilities; do not start

@@ -44,6 +44,16 @@
   --color-severity-low: #2d6a4f;
   --color-severity-low-bg: #e2f3ec;
 
+  /* --- Comparison status (Phase 3F; same "never colour alone" rule as
+     severity above). "persistent" reuses the brand pair and "resolved"
+     reuses the severity-low pair -- both already convey a similar
+     "unchanged"/"good" register -- so only "new" needs a dedicated pair,
+     distinct from every severity colour, since a "New" badge often sits
+     directly next to a severity badge and must not be visually
+     confusable with it. -------------------------------------------- */
+  --color-status-new: #8a1c6b;
+  --color-status-new-bg: #fbe4f2;
+
   /* --- Spacing scale ------------------------------------------------------- */
   --space-3xs: 0.25rem;
   --space-2xs: 0.5rem;
@@ -259,6 +269,29 @@ code {
   color: var(--color-text-muted);
   background: var(--color-surface);
   border-color: var(--color-border);
+}
+
+/*
+  Comparison status (Phase 3F) -- same "never colour alone" rule: every
+  element carrying one of these classes must also render "New"/
+  "Persistent"/"Resolved" as visible text.
+*/
+.status-label--new {
+  color: var(--color-status-new);
+  background: var(--color-status-new-bg);
+  border-color: var(--color-status-new);
+}
+
+.status-label--persistent {
+  color: var(--color-brand-600);
+  background: var(--color-brand-100);
+  border-color: var(--color-brand-600);
+}
+
+.status-label--resolved {
+  color: var(--color-severity-low);
+  background: var(--color-severity-low-bg);
+  border-color: var(--color-severity-low);
 }
 
 /* --------------------------------------------------------------------------

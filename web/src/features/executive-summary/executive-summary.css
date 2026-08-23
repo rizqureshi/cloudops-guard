@@ -1,0 +1,143 @@
+/*
+  Executive summary styles. Uses only the project-owned design tokens from
+  ../../styles/global.css (loaded once via BaseLayout) -- no UI framework,
+  no icon package, no remote font, no chart library.
+*/
+
+.executive-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.executive-summary__badge {
+  align-self: flex-start;
+}
+
+.executive-summary section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.executive-summary h2 {
+  font-size: var(--font-size-md);
+  margin: 0;
+}
+
+.executive-summary__detail-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-3xs) var(--space-sm);
+}
+
+.executive-summary__detail-list dt {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.executive-summary__detail-list dd {
+  margin: 0;
+}
+
+.executive-summary__severity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+}
+
+.executive-summary__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.executive-summary__empty {
+  margin: 0;
+  padding: var(--space-md);
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.executive-summary__category-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* Kept as a visibly numbered list (not `list-style: none`) -- the ranking
+   itself is meaningful content: these are prioritized, in order. */
+.executive-summary__recommendation-list {
+  margin: 0;
+  padding-left: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.executive-summary__category-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.executive-summary__category-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.executive-summary__category-count {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.executive-summary__recommendation-item {
+  padding: var(--space-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.executive-summary__recommendation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.executive-summary__check-id {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.executive-summary__recommendation-text {
+  margin: var(--space-2xs) 0 0;
+}
+
+.executive-summary__scope-list {
+  margin: 0;
+  padding-left: var(--space-md);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+@media (max-width: 40rem) {
+  .executive-summary__detail-list {
+    grid-template-columns: 1fr;
+  }
+}

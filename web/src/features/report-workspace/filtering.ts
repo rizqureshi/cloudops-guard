@@ -4,17 +4,26 @@
  * workspace UI actually displays.
  */
 
+import type { ComparisonStatus } from "../comparison/types";
 import type { NormalizedFinding, Severity } from "../report-import";
 import { deriveCategory, type FindingCategory } from "./category";
 import { compareOrdinal } from "./sorting";
 
 export const SEVERITY_FILTER_OPTIONS: readonly Severity[] = ["critical", "high", "medium", "low"];
 
+/**
+ * `comparisonStatus` is meaningful only when the workspace is rendering a
+ * comparison (see `workspaceItems.ts`); in single-report mode it is always
+ * `"all"` and the UI never renders a control for it. Kept as one flat
+ * filter-state shape, like every other filter field here, rather than a
+ * separate optional structure.
+ */
 export interface WorkspaceFilterState {
   readonly search: string;
   readonly severity: Severity | "all";
   readonly category: FindingCategory | "all";
   readonly resourceKind: string | "all";
+  readonly comparisonStatus: ComparisonStatus | "all";
 }
 
 export const DEFAULT_FILTER_STATE: WorkspaceFilterState = {
@@ -22,6 +31,7 @@ export const DEFAULT_FILTER_STATE: WorkspaceFilterState = {
   severity: "all",
   category: "all",
   resourceKind: "all",
+  comparisonStatus: "all",
 };
 
 /** The same fields the finding row/detail UI displays -- nothing hidden. */

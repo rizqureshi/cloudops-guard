@@ -118,6 +118,7 @@ describe("filterFindings", () => {
 
   it("combines search, severity, category, and resource-kind filters", () => {
     const result = filterFindings(allFindings, {
+      ...DEFAULT_FILTER_STATE,
       search: "cache-pod",
       severity: "high",
       category: "Reliability",

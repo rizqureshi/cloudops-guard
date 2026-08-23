@@ -7,44 +7,66 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3E &mdash; GitLab Interactive Demonstration
+## Current phase: 3F &mdash; Comparison and Executive Summary
 
 The static web foundation (Phase 3B), the browser-side report-contract
-layer under [`src/features/report-import/`](src/features/report-import/)
-(Phase 3C), and the Kubernetes interactive demonstration at
-`/demo/kubernetes` (Phase 3D, closed) are unchanged. Phase 3E adds the
-second interactive route, **`/demo/gitlab`**: two deterministic synthetic
-GitLab reports for the same fictional project
-([`src/data/synthetic-gitlab-report-unprotected-branch.json`](src/data/synthetic-gitlab-report-unprotected-branch.json)
-and
-[`-protected-branch.json`](src/data/synthetic-gitlab-report-protected-branch.json),
-together covering all eleven implemented GitLab checks) are parsed at
-build time through the existing `parseGitLabReport`. Two reports exist,
-not one, because the production evaluator can never emit `GL-BR-001` (no
-protected-branch rule matches the default branch) in the same report as
-`GL-BR-002`/`GL-BR-003` (which both require a matching rule) -- one report
-asserting all three would misrepresent a real scan. A one-report-at-a-time
-scenario selector
-([`src/features/gitlab-demo/GitLabDemo.tsx`](src/features/gitlab-demo/GitLabDemo.tsx))
-switches between the two fixed, independent examples; this is explicitly
-not comparison functionality -- only one report is ever shown, nothing is
-diffed, and no finding is labeled new/persistent/resolved. The shared
-report-workspace island
-([`src/features/report-workspace/`](src/features/report-workspace/)) was
-deliberately generalized from accepting only a Kubernetes report to the
-full `NormalizedWebReport` union, so it now renders a correct GitLab
-target identity (platform, GitLab instance URL as plain text -- never a
-link, project ID, project path, default branch, generated timestamp)
-alongside its existing Kubernetes identity rendering. `/demo/gitlab`
-hydrates exactly one island (the selector plus workspace, `client:load`);
-`/demo/kubernetes` and `/` are unchanged. The following remain
-**intentionally absent**, and arrive in later phases (see the milestone
-document, §R):
+layer (Phase 3C), and the Kubernetes and GitLab interactive demonstrations
+at `/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E, both closed)
+are unchanged in their route/content fundamentals. Phase 3F adds
+comparison and an executive summary to both demo routes:
+
+- A new, browser-only comparison feature
+  ([`src/features/comparison/`](src/features/comparison/)), kept separate
+  from the normalized report representation and from the released Python
+  report contracts. Findings are fingerprinted on identity fields only
+  (checkId/clusterContext/namespace/resourceKind/resourceName/
+  containerName for Kubernetes; checkId/projectPath/resourceKind/
+  resourceName/jobName for GitLab -- never severity, wording, or
+  timestamp), using a collision-safe `JSON.stringify`-on-a-tuple
+  fingerprint rather than a delimiter-joined string. An older and a newer
+  report are validated (same platform; newer's timestamp strictly later,
+  compared as instants; compatible target) and then multiset-matched into
+  new/persistent/resolved results -- an O(n) grouping, never O(n²), so it
+  stays suitable as reports approach the existing 10,000-finding limit.
+  `GL-CI-001` uses the image reference as `resourceName`, so a changed
+  image reference for the same job appears as one resolved result plus one
+  new result, not a persistent result whose evidence changed -- an
+  approved, documented limitation, demonstrated directly in the synthetic
+  GitLab dataset.
+- A new, deterministic executive-summary feature
+  ([`src/features/executive-summary/`](src/features/executive-summary/)):
+  target identity, totals, affected categories (deterministically ordered
+  by highest severity present, then descending count, then category name),
+  and up to five prioritized, deduplicated, category-diverse
+  recommendations -- computed as a pure function of report/comparison
+  data, never an LLM call, and explicitly disclaiming any health/safety/
+  compliance/completeness claim. In comparison mode, resolved findings are
+  excluded from affected categories and recommendations (though their
+  total is still shown), and severity totals always reflect the newer
+  report only.
+- A shared scan-state controller
+  ([`src/features/demo-controller/DemoController.tsx`](src/features/demo-controller/DemoController.tsx)),
+  replacing Phase 3E's GitLab-only scenario selector (the `gitlab-demo`
+  feature folder was removed), now used on both demo routes: earlier
+  scan / later scan / compare-earlier-to-later modes, plus a
+  findings/executive-summary view toggle. Switching mode resets search,
+  filters, sort order, the view, and any expanded finding details.
+- `ReportWorkspace` gained a comparison mode (`mode: "comparison"`,
+  alongside the existing `mode: "single"`): a comparison-status filter and
+  sort option, a New/Persistent/Resolved totals bar, and a status badge on
+  each finding row -- all absent in single mode.
+- A second synthetic Kubernetes report
+  ([`src/data/synthetic-kubernetes-report-later.json`](src/data/synthetic-kubernetes-report-later.json))
+  and adaptations to the existing two synthetic GitLab reports, so both
+  demos have a real earlier/later pair to compare.
+
+`/demo/kubernetes` and `/demo/gitlab` each still hydrate exactly one
+island (`DemoController`, `client:load`); `/` is unchanged. The following
+remain **intentionally absent**, and arrive in later phases (see the
+milestone document, §R):
 
 - The local report explorer, and the report-import UI it needs (file
   selection, drag-and-drop, `File`/`FileReader` usage).
-- Comparison logic, fingerprints, target-compatibility checks, or the
-  executive-summary view.
 - The check catalogue and other product pages (`/checks`, `/roadmap`, `/learn`, etc.).
 - The contact/feedback endpoint(s) or Worker source.
 - Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
@@ -93,26 +115,35 @@ npm run preview
 - Astro, configured for **static output only** &mdash; no SSR adapter.
 - The official `@astrojs/react` integration provides React islands. `/`
   remains fully static with zero client-side hydration; `/demo/kubernetes`
-  hydrates exactly one island (the report-workspace) via `client:load`;
-  `/demo/gitlab` hydrates exactly one island (the scenario selector plus
-  report-workspace, also generalized to render a GitLab report) via
-  `client:load`; no other route hydrates anything.
+  and `/demo/gitlab` each hydrate exactly one island (`DemoController`,
+  containing the scan-state controller, `ReportWorkspace`, and
+  `ExecutiveSummary` internally) via `client:load`; no other route
+  hydrates anything. `DemoController` deliberately never receives a
+  function as a prop from its `.astro` page: Astro's island-props
+  serialization is JSON-based, so a function value cannot survive
+  `client:load` hydration (this was verified directly against the built
+  output during Phase 3F). It instead picks the platform-appropriate
+  comparator internally, from the reports' own `platform` field.
 - TypeScript runs under Astro's `strictest` preset.
 - All styling is project-owned CSS (custom properties in
-  `src/styles/global.css`, plus a small workspace-specific stylesheet under
-  `src/features/report-workspace/`) &mdash; no UI framework, no CSS framework,
-  no icon package, no external font or icon service.
+  `src/styles/global.css`, plus small per-feature stylesheets under
+  `src/features/report-workspace/`, `src/features/executive-summary/`, and
+  `src/features/demo-controller/`) &mdash; no UI framework, no CSS
+  framework, no icon package, no chart library, no external font or icon
+  service.
 - No analytics, telemetry, session replay, advertising, or third-party runtime
-  script is present anywhere in this phase. The report-workspace island keeps
-  all state in React memory only (no `localStorage`/`sessionStorage`/
-  IndexedDB/cookies) and never calls `fetch`/`XMLHttpRequest`/`WebSocket`.
+  script is present anywhere in this phase. Every island keeps all state in
+  React memory only (no `localStorage`/`sessionStorage`/IndexedDB/cookies)
+  and never calls `fetch`/`XMLHttpRequest`/`WebSocket`/`sendBeacon`.
 - The report-import layer (`src/features/report-import/`) uses
   [Zod](https://zod.dev/) for runtime schema validation and
   [Vitest](https://vitest.dev/) for unit tests; both run against plain
   TypeScript/JSON in a Node test environment, with no DOM emulation and no
-  network access.
-- The report-workspace and gitlab-demo islands' component tests
-  (`tests/component/report-workspace/`, `tests/component/gitlab-demo/`) use
+  network access. The comparison (`src/features/comparison/`) and
+  executive-summary (`src/features/executive-summary/`) calculation logic
+  are likewise plain TypeScript, tested the same way.
+- Component tests for `ReportWorkspace`, `ExecutiveSummary`, and
+  `DemoController` (`tests/component/`) use
   [React Testing Library](https://testing-library.com/react),
   `@testing-library/user-event`, and `jsdom`. The jsdom environment is
   opted into per test file (a `// @vitest-environment jsdom` docblock),

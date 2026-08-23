@@ -1,0 +1,88 @@
+{
+  "cluster_context": "cloudops-guard-demo-cluster",
+  "namespace_filter": null,
+  "generated_at": "2026-06-15T09:00:00Z",
+  "findings": [
+    {
+      "check_id": "K8S-RES-001",
+      "title": "Container has no CPU request",
+      "severity": "medium",
+      "cluster_context": "cloudops-guard-demo-cluster",
+      "namespace": "payments-demo",
+      "resource_kind": "Deployment",
+      "resource_name": "checkout-api",
+      "container_name": "api",
+      "evidence": "Container 'api' (image: example.com/checkout-api:2.4.0) does not set resources.requests.cpu",
+      "impact": "Without a CPU request the scheduler cannot reserve capacity for this container, increasing the risk of CPU contention with other workloads on the same node.",
+      "recommendation": "Set resources.requests.cpu based on observed usage.",
+      "auto_remediable": false,
+      "audited_at": "2026-06-15T09:00:00Z"
+    },
+    {
+      "check_id": "K8S-IMG-001",
+      "title": "Container image uses a mutable tag",
+      "severity": "high",
+      "cluster_context": "cloudops-guard-demo-cluster",
+      "namespace": "payments-demo",
+      "resource_kind": "Pod",
+      "resource_name": "checkout-batch-7f9c2",
+      "container_name": "worker",
+      "evidence": "Container 'worker' uses image 'example.com/checkout-batch:latest' (tag: latest)",
+      "impact": "A mutable tag such as 'latest', or no tag at all, means the exact image content running today may differ from what runs after the next pod restart, undermining reproducibility, rollback safety and supply-chain traceability. A specific version tag (e.g. app:1.4.2) is a meaningful improvement over 'latest', but a tag can still be overwritten and re-pushed in the registry — it is not itself a guarantee of immutability.",
+      "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).",
+      "auto_remediable": false,
+      "audited_at": "2026-06-15T09:00:00Z"
+    },
+    {
+      "check_id": "K8S-REL-001",
+      "title": "Container has an excessive restart count",
+      "severity": "high",
+      "cluster_context": "cloudops-guard-demo-cluster",
+      "namespace": "commerce-demo",
+      "resource_kind": "Pod",
+      "resource_name": "inventory-cache-5d8f1",
+      "container_name": "redis",
+      "evidence": "Container 'redis' in pod 'inventory-cache-5d8f1' has restarted 14 time(s) (cumulative for the pod's current lifetime), meeting or exceeding the configured threshold of 5",
+      "impact": "Frequent restarts typically indicate crash looping, failing health checks, or resource exhaustion, and reduce the reliability of the workload.",
+      "recommendation": "Inspect this container's events and state for the root cause (crash, OOMKill, failed probe) before increasing replica count or ignoring the symptom.",
+      "auto_remediable": false,
+      "audited_at": "2026-06-15T09:00:00Z"
+    },
+    {
+      "check_id": "K8S-RES-002",
+      "title": "Container has no memory request",
+      "severity": "medium",
+      "cluster_context": "cloudops-guard-demo-cluster",
+      "namespace": "messaging-demo",
+      "resource_kind": "Deployment",
+      "resource_name": "event-relay",
+      "container_name": "relay",
+      "evidence": "Container 'relay' (image: example.com/event-relay:1.0.3) does not set resources.requests.memory",
+      "impact": "Without a memory request the scheduler cannot reserve capacity for this container, increasing the risk of scheduling it onto an already memory-pressured node.",
+      "recommendation": "Set resources.requests.memory based on observed usage.",
+      "auto_remediable": false,
+      "audited_at": "2026-06-15T09:00:00Z"
+    },
+    {
+      "check_id": "K8S-IMG-001",
+      "title": "Container image uses a mutable tag",
+      "severity": "high",
+      "cluster_context": "cloudops-guard-demo-cluster",
+      "namespace": "commerce-demo",
+      "resource_kind": "Pod",
+      "resource_name": "audit-log-9c3f2",
+      "container_name": "shipper",
+      "evidence": "Container 'shipper' uses image 'example.com/audit-log-shipper' (tag: (no tag))",
+      "impact": "A mutable tag such as 'latest', or no tag at all, means the exact image content running today may differ from what runs after the next pod restart, undermining reproducibility, rollback safety and supply-chain traceability. A specific version tag (e.g. app:1.4.2) is a meaningful improvement over 'latest', but a tag can still be overwritten and re-pushed in the registry — it is not itself a guarantee of immutability.",
+      "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).",
+      "auto_remediable": false,
+      "audited_at": "2026-06-15T09:00:00Z"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "high": 3,
+    "medium": 2,
+    "low": 0
+  }
+}
