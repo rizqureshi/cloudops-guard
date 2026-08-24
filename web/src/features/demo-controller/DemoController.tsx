@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { compareGitLabReports, compareKubernetesReports } from "../comparison/compare";
-import { ComparisonError } from "../comparison/errors";
-import type { ComparisonResult } from "../comparison/types";
+import { compareReports } from "../comparison/compare";
 import { buildComparisonExecutiveSummary, buildSingleReportExecutiveSummary } from "../executive-summary/summary";
 import { ExecutiveSummary } from "../executive-summary/ExecutiveSummary";
 import type { NormalizedWebReport } from "../report-import";
@@ -20,37 +18,16 @@ interface DemoControllerProps<TReport extends NormalizedWebReport> {
 }
 
 /**
- * Picks the platform-appropriate comparator from the reports' own
- * `platform` field, rather than accepting a `compare` function as a prop.
- * A function value cannot survive Astro's island-props serialization
- * (props are serialized to JSON for client-side hydration) -- passing one
- * as a prop would silently arrive as `null` on the client, breaking
- * comparison mode the moment a visitor's browser hydrates the island.
- * `platform` is an ordinary string field on already-serializable report
- * data, so this has no such problem.
- */
-function compareReports(older: NormalizedWebReport, newer: NormalizedWebReport): ComparisonResult {
-  if (older.platform === "kubernetes") {
-    if (newer.platform !== "kubernetes") {
-      throw new ComparisonError("mixed_platform");
-    }
-    return compareKubernetesReports(older, newer);
-  }
-  if (newer.platform !== "gitlab") {
-    throw new ComparisonError("mixed_platform");
-  }
-  return compareGitLabReports(older, newer);
-}
-
-/**
  * The shared controller for both demo routes (`/demo/kubernetes` and
  * `/demo/gitlab`): a scan-state selector (earlier scan / later scan /
  * compare earlier to later) plus a findings/executive-summary view
  * toggle, wrapping `ReportWorkspace` and `ExecutiveSummary`. Written once,
  * generic over the concrete report type, rather than duplicated per
  * platform -- each demo page supplies its own two reports and labels;
- * `compareReports` above picks the right platform-specific comparator
- * internally.
+ * the shared `compareReports` (`../comparison/compare.ts`) picks the right
+ * platform-specific comparator internally. That dispatcher is also used,
+ * unmodified, by the local report explorer (Phase 3G), so the
+ * platform-dispatch logic exists exactly once.
  *
  * Comparison is computed lazily (`useMemo`, only when `mode === "comparison"`)
  * rather than eagerly on every render, and kept in React memory only.
@@ -85,8 +62,8 @@ export function DemoController<TReport extends NormalizedWebReport>({
 
   const workspaceProps: ReportWorkspaceProps =
     mode === "comparison" && comparison
-      ? { mode: "comparison", comparison }
-      : { mode: "single", report: activeReport };
+      ? { mode: "comparison", source: "synthetic", comparison }
+      : { mode: "single", source: "synthetic", report: activeReport };
 
   const executiveSummaryData =
     mode === "comparison" && comparison
@@ -155,7 +132,7 @@ export function DemoController<TReport extends NormalizedWebReport>({
       {view === "findings" ? (
         <ReportWorkspace key={mode} {...workspaceProps} />
       ) : (
-        <ExecutiveSummary key={mode} summary={executiveSummaryData} />
+        <ExecutiveSummary key={mode} source="synthetic" summary={executiveSummaryData} />
       )}
     </div>
   );

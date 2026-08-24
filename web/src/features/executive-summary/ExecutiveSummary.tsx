@@ -1,8 +1,18 @@
 import "./executive-summary.css";
+import { REPORT_SOURCE_LABELS, type ReportSource } from "../report-workspace/reportSource";
 import type { ExecutiveSummary as ExecutiveSummaryData } from "./types";
 
 interface ExecutiveSummaryProps {
   readonly summary: ExecutiveSummaryData;
+  /**
+   * A narrow, application-controlled discriminant -- never derived from
+   * report content -- selecting the visible source indicator and the
+   * "synthetic"/plain "scan state" wording below via `REPORT_SOURCE_LABELS`
+   * (`../report-workspace/reportSource.ts`). `DemoController` always
+   * passes `"synthetic"`; the local report explorer always passes
+   * `"local"`. There is no prop that accepts an arbitrary label string.
+   */
+  readonly source: ReportSource;
 }
 
 function capitalize(value: string): string {
@@ -17,13 +27,19 @@ function capitalize(value: string): string {
  * `dangerouslySetInnerHTML`, Markdown, or HTML injection -- and no
  * report-derived string ever becomes an `href`.
  */
-export function ExecutiveSummary({ summary }: ExecutiveSummaryProps) {
+export function ExecutiveSummary({ summary, source }: ExecutiveSummaryProps) {
   const totalActiveFindings =
     summary.mode === "single" ? summary.summary.total : summary.affectedCategories.reduce((sum, c) => sum + c.count, 0);
+  // "synthetic scan state" is only accurate for demo data; a local report
+  // is a real report the visitor selected, so the scope/limitations copy
+  // below must not call it "synthetic".
+  const scanStateNoun = source === "synthetic" ? "synthetic scan state" : "scan state";
 
   return (
     <div className="executive-summary">
-      <p className="status-label status-label--neutral executive-summary__badge">Synthetic demonstration</p>
+      <p className="status-label status-label--neutral executive-summary__badge">
+        {REPORT_SOURCE_LABELS[source]}
+      </p>
 
       <section aria-labelledby="exec-summary-target-heading">
         <h2 id="exec-summary-target-heading">Target</h2>
@@ -128,7 +144,7 @@ export function ExecutiveSummary({ summary }: ExecutiveSummaryProps) {
         {summary.affectedCategories.length === 0 ? (
           <p className="executive-summary__empty">
             {totalActiveFindings === 0
-              ? "No findings are present in this synthetic scan state. This reflects only the checks that produced a finding here -- it is not a claim that the target is healthy, safe, compliant, or comprehensively audited."
+              ? `No findings are present in this ${scanStateNoun}. This reflects only the checks that produced a finding here -- it is not a claim that the target is healthy, safe, compliant, or comprehensively audited.`
               : "No affected categories to report."}
           </p>
         ) : (
@@ -152,7 +168,7 @@ export function ExecutiveSummary({ summary }: ExecutiveSummaryProps) {
         <h2 id="exec-summary-recommendations-heading">Prioritized recommendations</h2>
         {summary.recommendations.length === 0 ? (
           <p className="executive-summary__empty">
-            No recommendations to prioritize for this synthetic scan state.
+            No recommendations to prioritize for this {scanStateNoun}.
           </p>
         ) : (
           <ol className="executive-summary__recommendation-list">
@@ -187,8 +203,8 @@ export function ExecutiveSummary({ summary }: ExecutiveSummaryProps) {
             passed.
           </li>
           <li>
-            This summary reflects only the findings present in the supplied synthetic scan
-            state{summary.mode === "comparison" ? "s" : ""}, not a live audit.
+            This summary reflects only the findings present in the supplied {scanStateNoun}
+            {summary.mode === "comparison" ? "s" : ""}, not a live audit.
           </li>
           <li>
             The implemented Kubernetes and GitLab checks do not provide complete coverage of either

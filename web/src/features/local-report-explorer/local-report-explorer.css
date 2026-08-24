@@ -1,0 +1,187 @@
+/*
+  Local report explorer styles. Uses only the project-owned design tokens
+  from ../../styles/global.css -- no UI framework, no icon package, no
+  chart library, no remote font.
+*/
+
+.local-report-explorer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.local-report-explorer__privacy {
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.local-report-explorer__privacy h2 {
+  margin: 0;
+  font-size: var(--font-size-md);
+}
+
+.local-report-explorer__privacy p {
+  margin: 0;
+}
+
+.local-report-explorer__privacy ul {
+  margin: 0;
+  padding-left: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+.local-report-explorer__slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.local-report-explorer__slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.local-report-explorer__slot label {
+  font-weight: var(--font-weight-medium);
+}
+
+.local-report-explorer__slot input[type="file"] {
+  font: inherit;
+  color: var(--color-text);
+}
+
+.local-report-explorer__slot-help {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.local-report-explorer__slot-status {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.local-report-explorer__slot-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-severity-high);
+}
+
+.local-report-explorer__slot-actions {
+  display: flex;
+  gap: var(--space-2xs);
+}
+
+.local-report-explorer__button {
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast) var(--transition-easing);
+  align-self: flex-start;
+}
+
+.local-report-explorer__button:hover {
+  background: var(--color-bg);
+}
+
+.local-report-explorer__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.local-report-explorer__mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.local-report-explorer__mode legend {
+  font-weight: var(--font-weight-medium);
+  padding: 0 var(--space-2xs) 0 0;
+}
+
+.local-report-explorer__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.local-report-explorer__radio input:disabled {
+  cursor: not-allowed;
+}
+
+.local-report-explorer__mode-note,
+.local-report-explorer__comparison-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.local-report-explorer__view-toggle {
+  display: inline-flex;
+  gap: var(--space-3xs);
+  align-self: flex-start;
+}
+
+.local-report-explorer__view-button {
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color var(--transition-fast) var(--transition-easing);
+}
+
+.local-report-explorer__view-button:hover {
+  background: var(--color-bg);
+}
+
+.local-report-explorer__view-button[aria-pressed="true"] {
+  background: var(--color-brand-600);
+  border-color: var(--color-brand-600);
+  color: var(--color-text-on-brand);
+}
+
+.local-report-explorer__empty {
+  margin: 0;
+  padding: var(--space-md);
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+}
+
+@media (max-width: 40rem) {
+  .local-report-explorer__slots {
+    grid-template-columns: 1fr;
+  }
+}

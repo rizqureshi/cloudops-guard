@@ -63,4 +63,16 @@ export default [
       globals: { ...globals.node },
     },
   },
+
+  // TypeScript config files that also run under Node (not the browser) --
+  // e.g. `playwright.config.ts` reads `process.env.CI`. Layered after the
+  // general `**/*.ts`/`**/*.tsx` block above so `process` and other Node
+  // globals are added on top of it for this one file, without changing the
+  // browser-globals default for ordinary application/test source.
+  {
+    files: ["playwright.config.ts"],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
 ];

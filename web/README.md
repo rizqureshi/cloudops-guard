@@ -7,12 +7,15 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3F &mdash; Comparison and Executive Summary
+## Current phase: 3G &mdash; Local Report Explorer Privacy Boundary
 
 The static web foundation (Phase 3B), the browser-side report-contract
-layer (Phase 3C), and the Kubernetes and GitLab interactive demonstrations
-at `/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E, both closed)
-are unchanged in their route/content fundamentals. Phase 3F adds
+layer (Phase 3C), the Kubernetes and GitLab interactive demonstrations at
+`/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), and comparison
+plus the executive summary (Phase 3F) are unchanged in their route/content
+fundamentals; Phases 3B&ndash;3F are closed. **Phase 3G has implemented
+`/explorer`, a local `report.json` explorer, but is not yet closed** (see
+the milestone document for the exact closure gate). Phase 3F added
 comparison and an executive summary to both demo routes:
 
 - A new, browser-only comparison feature
@@ -61,16 +64,70 @@ comparison and an executive summary to both demo routes:
   demos have a real earlier/later pair to compare.
 
 `/demo/kubernetes` and `/demo/gitlab` each still hydrate exactly one
-island (`DemoController`, `client:load`); `/` is unchanged. The following
-remain **intentionally absent**, and arrive in later phases (see the
-milestone document, §R):
+island (`DemoController`, `client:load`); `/` is unchanged.
 
-- The local report explorer, and the report-import UI it needs (file
-  selection, drag-and-drop, `File`/`FileReader` usage).
+Phase 3G adds a fourth route, `/explorer`, that opens one or two local
+`report.json` files entirely in the browser:
+
+- A new import pipeline
+  ([`src/features/local-report-explorer/importLocalReportFile.ts`](src/features/local-report-explorer/importLocalReportFile.ts)):
+  a case-insensitive `.json`-extension check runs before any read;
+  `assertReportFileSize` runs before `File.text()`; the parsed JSON is
+  then passed through the same `parseReport` used by the demo routes.
+  Sanitized errors (`LocalReportExplorer`'s own
+  [`errors.ts`](src/features/local-report-explorer/errors.ts)) never
+  reproduce a filename, a native `JSON.parse` message, a Zod issue, or an
+  arbitrary caught-exception string.
+- A race-safe `useReportSlot` hook
+  ([`src/features/local-report-explorer/useReportSlot.ts`](src/features/local-report-explorer/useReportSlot.ts)):
+  a per-slot generation counter, so the latest file selection always
+  wins regardless of resolution order, and `clear()` invalidates any
+  read still in flight.
+- Two labeled file inputs ("Earlier or primary report", "Later report for
+  comparison (optional)") in
+  [`LocalReportExplorer.tsx`](src/features/local-report-explorer/LocalReportExplorer.tsx),
+  each `accept=".json,application/json"` with no `multiple` or directory
+  selection, per-slot clear controls plus a clear-all control, and a
+  findings/executive-summary view toggle -- the same real
+  `ReportWorkspace`/`ExecutiveSummary` components the demo routes use,
+  never a reimplementation.
+- Comparison is handled by a `compareReports` dispatcher moved into
+  [`src/features/comparison/compare.ts`](src/features/comparison/compare.ts)
+  and shared by both `DemoController` and the explorer -- no duplicated
+  platform-dispatch logic.
+- `ReportWorkspace` and `ExecutiveSummary` both take a `source: "synthetic"
+  | "local"` discriminant; the demo routes always pass `"synthetic"`
+  ("Synthetic demonstration") and the explorer always passes `"local"`
+  ("Local report") -- never a report-derived string.
+- Astro 7's native `security.csp` support is enabled
+  ([`astro.config.mjs`](astro.config.mjs)), with a shared restrictive
+  directive set
+  ([`src/lib/reportRouteCsp.ts`](src/lib/reportRouteCsp.ts): `default-src
+  'none'; connect-src 'none'; img-src 'self'; font-src 'none'; object-src
+  'none'; base-uri 'none'; form-action 'none'; frame-src 'none';
+  worker-src 'none'; media-src 'none'; manifest-src 'none'`, plus Astro's
+  own hash-based `script-src`/`style-src`) applied on `/explorer`,
+  `/demo/kubernetes`, and `/demo/gitlab`.
+- A new `@playwright/test` dev dependency (Chromium only for now --
+  `@axe-core/playwright` and the full cross-browser matrix are Phase 3J)
+  drives
+  [`tests/e2e/local-report-explorer.spec.ts`](tests/e2e/local-report-explorer.spec.ts)
+  against the real production build (`npm run build` then Playwright's
+  own `astro preview` webServer), proving zero network requests/failures
+  during import and interaction, no `localStorage`/`sessionStorage`/
+  IndexedDB/cookie/service-worker artifacts, an empty state after reload,
+  and CSP-compatible hydration. Run it with `npm run test:e2e` (requires
+  `npx playwright install chromium` once, and `npm run build` first).
+
+The following remain **intentionally absent**, and arrive in later phases
+(see the milestone document, §R):
+
 - The check catalogue and other product pages (`/checks`, `/roadmap`, `/learn`, etc.).
 - The contact/feedback endpoint(s) or Worker source.
 - Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
   workflow.
+- Full automated accessibility (`axe`) scanning and the Firefox/WebKit
+  legs of the Playwright matrix (Phase 3J).
 
 **No production deployment is authorized in this phase or by anything in this
 directory.** Deployment requires a separate, explicit, later authorization (see the
@@ -108,6 +165,10 @@ npm run build
 
 # Preview the production build locally.
 npm run preview
+
+# End-to-end tests (Playwright, Chromium only). Requires a production
+# build first (npm run build) and, once, npx playwright install chromium.
+npm run test:e2e
 ```
 
 ## Design notes
@@ -117,8 +178,11 @@ npm run preview
   remains fully static with zero client-side hydration; `/demo/kubernetes`
   and `/demo/gitlab` each hydrate exactly one island (`DemoController`,
   containing the scan-state controller, `ReportWorkspace`, and
-  `ExecutiveSummary` internally) via `client:load`; no other route
-  hydrates anything. `DemoController` deliberately never receives a
+  `ExecutiveSummary` internally) via `client:load`; `/explorer` hydrates
+  exactly one island (`LocalReportExplorer`) via `client:load`, with no
+  synthetic or default report serialized into its props (`props="{}"` in
+  the built output); no other route hydrates anything. `DemoController`
+  deliberately never receives a
   function as a prop from its `.astro` page: Astro's island-props
   serialization is JSON-based, so a function value cannot survive
   `client:load` hydration (this was verified directly against the built

@@ -30,3 +30,7 @@ htmlcov/
 web/node_modules/
 web/.astro/
 web/dist/
+
+# Web (Playwright) generated files
+web/playwright-report/
+web/test-results/

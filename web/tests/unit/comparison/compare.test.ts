@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { compareGitLabReports, compareKubernetesReports } from "../../../src/features/comparison/compare";
+import { compareGitLabReports, compareKubernetesReports, compareReports } from "../../../src/features/comparison/compare";
+import { ComparisonError } from "../../../src/features/comparison/errors";
 import type { ComparisonFindingResult } from "../../../src/features/comparison/types";
 import type { NormalizedGitLabFinding, NormalizedKubernetesFinding } from "../../../src/features/report-import";
 import { buildNormalizedGitLabFinding, buildNormalizedGitLabReport } from "../../helpers/normalizedGitLabFixtures";
@@ -193,5 +194,55 @@ describe("compareGitLabReports: GL-CI-001 image-reference-change limitation", ()
 
     const result = compareGitLabReports(older, newer);
     expect(statusCounts(result.results)).toEqual({ new: 0, persistent: 1, resolved: 0 });
+  });
+});
+
+describe("compareReports: shared platform-dispatch (Phase 3G)", () => {
+  it("dispatches to compareKubernetesReports for a Kubernetes pair, producing the same result", () => {
+    const older = buildNormalizedKubernetesReport({ generatedAt: "2026-01-01T00:00:00Z" });
+    const newer = buildNormalizedKubernetesReport({ generatedAt: "2026-01-02T00:00:00Z" });
+
+    const dispatched = compareReports(older, newer);
+    const direct = compareKubernetesReports(older, newer);
+    expect(dispatched).toEqual(direct);
+    expect(dispatched.platform).toBe("kubernetes");
+  });
+
+  it("dispatches to compareGitLabReports for a GitLab pair, producing the same result", () => {
+    const older = buildNormalizedGitLabReport({ generatedAt: "2026-01-01T00:00:00Z" });
+    const newer = buildNormalizedGitLabReport({ generatedAt: "2026-01-02T00:00:00Z" });
+
+    const dispatched = compareReports(older, newer);
+    const direct = compareGitLabReports(older, newer);
+    expect(dispatched).toEqual(direct);
+    expect(dispatched.platform).toBe("gitlab");
+  });
+
+  it("rejects a mixed-platform pair with a sanitized ComparisonError, regardless of which side is which platform", () => {
+    const kubernetesReport = buildNormalizedKubernetesReport({ generatedAt: "2026-01-01T00:00:00Z" });
+    const gitlabReport = buildNormalizedGitLabReport({ generatedAt: "2026-01-02T00:00:00Z" });
+
+    expect(() => compareReports(kubernetesReport, gitlabReport)).toThrow(ComparisonError);
+    expect(() => compareReports(gitlabReport, kubernetesReport)).toThrow(ComparisonError);
+    try {
+      compareReports(kubernetesReport, gitlabReport);
+      expect.unreachable("compareReports should have thrown");
+    } catch (error) {
+      expect((error as ComparisonError).code).toBe("mixed_platform");
+    }
+  });
+
+  it("is pure and deterministic: calling it twice with the same inputs produces equal results and does not mutate either input", () => {
+    const older = buildNormalizedKubernetesReport({ generatedAt: "2026-01-01T00:00:00Z" });
+    const newer = buildNormalizedKubernetesReport({ generatedAt: "2026-01-02T00:00:00Z" });
+    const olderCopy = structuredClone(older);
+    const newerCopy = structuredClone(newer);
+
+    const first = compareReports(older, newer);
+    const second = compareReports(older, newer);
+
+    expect(first).toEqual(second);
+    expect(older).toEqual(olderCopy);
+    expect(newer).toEqual(newerCopy);
   });
 });

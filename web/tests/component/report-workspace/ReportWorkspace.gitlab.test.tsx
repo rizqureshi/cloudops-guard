@@ -102,7 +102,7 @@ function renderGitLabWorkspace() {
     },
     allFindings,
   );
-  return render(<ReportWorkspace mode="single" report={report} />);
+  return render(<ReportWorkspace mode="single" source="synthetic" report={report} />);
 }
 
 describe("ReportWorkspace: GitLab platform", () => {
@@ -327,7 +327,7 @@ describe("ReportWorkspace: GitLab platform", () => {
       evidence: "<img src=x onerror=alert(1)>plain evidence text</img>",
     });
     const report = buildNormalizedGitLabReport({}, [markupLikeFinding]);
-    const { container } = render(<ReportWorkspace mode="single" report={report} />);
+    const { container } = render(<ReportWorkspace mode="single" source="synthetic" report={report} />);
 
     expect(container.querySelector("img")).toBeNull();
     expect(

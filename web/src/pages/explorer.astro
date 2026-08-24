@@ -1,0 +1,47 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { LocalReportExplorer } from "../features/local-report-explorer";
+import { REPORT_ROUTE_CSP_DIRECTIVES } from "../lib/reportRouteCsp";
+
+// Restrictive Content-Security-Policy for this report-derived route -- see
+// src/lib/reportRouteCsp.ts for the full rationale. No default report or
+// synthetic report is imported or serialized into this page: the
+// `<LocalReportExplorer />` island below receives no props at all, so its
+// initial client-side state contains no report.
+for (const directive of REPORT_ROUTE_CSP_DIRECTIVES) {
+  // Non-null: `security.csp` is enabled globally in astro.config.mjs,
+  // so `Astro.csp` always exists on every prerendered page.
+  Astro.csp!.insertDirective(directive);
+}
+---
+
+<BaseLayout
+  title="Local report explorer — CloudOps Guard"
+  description="Open a CloudOps Guard report.json file the CLI already produced -- entirely inside your own browser. Files stay in this tab and are never uploaded anywhere."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Local report explorer</p>
+      <h1>Local report explorer</h1>
+      <p>
+        Open one or two CloudOps Guard <code>report.json</code> files the CLI already produced, and
+        explore them exactly like the demonstration pages above &mdash; entirely in your browser.
+      </p>
+      <ul>
+        <li>Selected files stay in this browser tab and are never uploaded anywhere.</li>
+        <li>Reloading or closing this tab clears any imported report.</li>
+        <li>
+          This page accepts only a CloudOps Guard <code>report.json</code> file &mdash; never a
+          kubeconfig file, a GitLab access token, CI/CD YAML, any other credential, or an HTML
+          report.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container">
+      <LocalReportExplorer client:load />
+    </div>
+  </section>
+</BaseLayout>

@@ -25,7 +25,7 @@ describe("ExecutiveSummary: single-report Kubernetes", () => {
       [finding],
     );
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.getByText("Kubernetes")).toBeInTheDocument();
     expect(screen.getByText("demo-cluster")).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("ExecutiveSummary: single-report GitLab", () => {
       [finding],
     );
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.getByText("GitLab")).toBeInTheDocument();
     const urlText = screen.getByText("https://gitlab.example.com");
@@ -95,7 +95,7 @@ describe("ExecutiveSummary: comparison mode", () => {
     ]);
     const comparison = compareKubernetesReports(older, newer);
     const summary = buildComparisonExecutiveSummary(comparison);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.getByText("2026-06-01T09:00:00Z")).toBeInTheDocument();
     expect(screen.getByText("2026-06-15T09:00:00Z")).toBeInTheDocument();
@@ -127,7 +127,7 @@ describe("ExecutiveSummary: comparison mode", () => {
     const newer = buildNormalizedGitLabReport({ generatedAt: "2026-07-15T08:00:00Z" }, [persistentFinding]);
     const comparison = compareGitLabReports(older, newer);
     const summary = buildComparisonExecutiveSummary(comparison);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(
       screen.getByText("Enable 'Pipelines must succeed' in the project's merge request settings."),
@@ -140,7 +140,7 @@ describe("ExecutiveSummary: honesty and safety", () => {
   it("renders an honest empty state for a zero-finding report, explicitly disclaiming health/safety/compliance", () => {
     const report = buildNormalizedKubernetesReport({}, []);
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     // The honest empty-state copy explicitly *names* health/safety/
     // compliance/comprehensiveness only to disclaim them ("it is not a
@@ -157,7 +157,7 @@ describe("ExecutiveSummary: honesty and safety", () => {
   it("never renders an unqualified health, risk, or maturity score claim", () => {
     const report = buildNormalizedKubernetesReport({}, [buildNormalizedKubernetesFinding()]);
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.queryByText(/health score/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/risk score/i)).not.toBeInTheDocument();
@@ -171,7 +171,7 @@ describe("ExecutiveSummary: honesty and safety", () => {
     });
     const report = buildNormalizedKubernetesReport({}, [finding]);
     const summary = buildSingleReportExecutiveSummary(report);
-    const { container } = render(<ExecutiveSummary summary={summary} />);
+    const { container } = render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(container.querySelector("img")).toBeNull();
     expect(
@@ -182,7 +182,7 @@ describe("ExecutiveSummary: honesty and safety", () => {
   it("scope and limitation copy covers every required point", () => {
     const report = buildNormalizedKubernetesReport({}, [buildNormalizedKubernetesFinding()]);
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.getByText(/not a complete per-check execution ledger/)).toBeInTheDocument();
     expect(screen.getByText(/synthetic scan state/)).toBeInTheDocument();
@@ -227,7 +227,7 @@ describe("ExecutiveSummary: recommendation React key regression (checkId + recom
   it("renders both recommendations and emits no React duplicate-key warning", () => {
     const report = buildNormalizedKubernetesReport({}, [collidingFindingA, collidingFindingB]);
     const summary = buildSingleReportExecutiveSummary(report);
-    render(<ExecutiveSummary summary={summary} />);
+    render(<ExecutiveSummary source="synthetic" summary={summary} />);
 
     expect(screen.getByText("BC")).toBeInTheDocument();
     expect(screen.getByText("C")).toBeInTheDocument();

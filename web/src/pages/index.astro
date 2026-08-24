@@ -4,7 +4,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 <BaseLayout
   title="CloudOps Guard"
-  description="CloudOps Guard is a read-only auditing tool for Kubernetes and GitLab CI/CD. This page is an early web-foundation preview of the v0.3.0 interactive web demo and local report explorer."
+  description="CloudOps Guard is a read-only auditing tool for Kubernetes and GitLab CI/CD. Explore interactive Kubernetes and GitLab demos, or open your own report.json in the local report explorer -- entirely in your browser."
 >
   <section class="hero">
     <div class="container container--narrow">
@@ -62,25 +62,27 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <p class="status-label status-label--neutral">Current web milestone</p>
       <h2 id="milestone-heading">Interactive Web Demo and Local Report Explorer</h2>
       <p>
-        This site is being built to let visitors explore CloudOps Guard's Kubernetes
-        and GitLab checks with synthetic example data, and to open a
-        <code>report.json</code> file the CLI already produced &mdash; entirely inside
-        their own browser, with the file never uploaded anywhere.
+        This site lets visitors explore CloudOps Guard's Kubernetes and GitLab checks
+        with synthetic example data, and open a <code>report.json</code> file the CLI
+        already produced &mdash; entirely inside their own browser, with the file
+        never uploaded anywhere.
       </p>
       <p>
-        Two interactive demonstrations are now implemented, each using two fixed
-        synthetic scan states for the same fictional target &mdash; search, filter,
-        sort, and inspect findings, compare the earlier state to the later one to see
+        Two interactive demonstrations are implemented, each using two fixed synthetic
+        scan states for the same fictional target &mdash; search, filter, sort, and
+        inspect findings, compare the earlier state to the later one to see
         new/persistent/resolved findings, and switch to a deterministic executive
-        summary, entirely in your browser. A searchable check catalogue, other product
-        pages, a contact form, and the local report explorer (for opening a
-        <code>report.json</code> file the CLI already produced, also never uploaded
-        anywhere) all arrive in later implementation phases. This site has not been
-        deployed, released, or published.
+        summary, entirely in your browser. The local report explorer opens one or two
+        <code>report.json</code> files the CLI already produced &mdash; also never
+        uploaded anywhere &mdash; and offers the same search/filter/sort/comparison/
+        executive-summary experience. A searchable check catalogue, other product
+        pages, and a contact form all arrive in later implementation phases. This site
+        has not been deployed, released, or published.
       </p>
       <p class="index-cta-group">
         <a class="cta" href="/demo/kubernetes">Explore Kubernetes &rarr;</a>
         <a class="cta" href="/demo/gitlab">Explore GitLab &rarr;</a>
+        <a class="cta" href="/explorer">Open Local Report Explorer &rarr;</a>
       </p>
     </div>
   </section>
@@ -118,13 +120,14 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <h2 id="roadmap-heading">What comes next</h2>
       <p>
         The interactive <a href="/demo/kubernetes">Kubernetes</a> and
-        <a href="/demo/gitlab">GitLab</a> demonstrations, including browser-side
-        report comparison and an executive summary view, are the first of these to be
-        implemented. Later phases add: a local report explorer that reads a
-        <code>report.json</code> file you choose, a searchable catalogue of every
-        implemented check, other product pages, and a separate, isolated contact
-        form. None of these other pieces exist on this site yet, and this site has
-        not been deployed, released, or published.
+        <a href="/demo/gitlab">GitLab</a> demonstrations, browser-side report
+        comparison and an executive summary view, and the
+        <a href="/explorer">local report explorer</a> are the first of these to be
+        implemented. Later phases add: a searchable catalogue of every implemented
+        check, other product pages, and a separate, isolated contact form. Full
+        screen-reader/WCAG accessibility review and a broader browser test matrix are
+        also still to come. None of these other pieces exist on this site yet, and
+        this site has not been deployed, released, or published.
       </p>
     </div>
   </section>

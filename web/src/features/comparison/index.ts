@@ -1,4 +1,4 @@
-export { compareGitLabReports, compareKubernetesReports } from "./compare";
+export { compareGitLabReports, compareKubernetesReports, compareReports } from "./compare";
 export { ComparisonError, type ComparisonErrorCode } from "./errors";
 export { computeFingerprint, type Fingerprint } from "./fingerprint";
 export {

@@ -10,6 +10,7 @@ export {
   SEVERITY_FILTER_OPTIONS,
   type WorkspaceFilterState,
 } from "./filtering";
+export { REPORT_SOURCE_LABELS, type ReportSource } from "./reportSource";
 export { compareOrdinal, sortFindings, SORT_OPTIONS, type SortOption } from "./sorting";
 export {
   buildSingleReportItems,

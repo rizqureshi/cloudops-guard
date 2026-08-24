@@ -23,11 +23,18 @@
  * and the same `results` order.
  */
 
-import type { NormalizedFinding, NormalizedGitLabReport, NormalizedKubernetesReport } from "../report-import";
+import type {
+  NormalizedFinding,
+  NormalizedGitLabReport,
+  NormalizedKubernetesReport,
+  NormalizedWebReport,
+} from "../report-import";
 import { compareOrdinal, sortFindings } from "../report-workspace/sorting";
+import { ComparisonError } from "./errors";
 import { computeFingerprint, type Fingerprint } from "./fingerprint";
 import type {
   ComparisonFindingResult,
+  ComparisonResult,
   ComparisonStatusTotals,
   GitLabComparisonResult,
   KubernetesComparisonResult,
@@ -151,4 +158,35 @@ export function compareGitLabReports(
     results,
     statusTotals: computeStatusTotals(results),
   };
+}
+
+/**
+ * Picks the platform-appropriate comparator from the reports' own
+ * `platform` field, rather than requiring the caller to already know which
+ * platform it has. Shared by `DemoController` (Phase 3F) and the local
+ * report explorer (Phase 3G) so the platform-dispatch logic exists exactly
+ * once. Pure and deterministic: receives no file, filename, DOM, storage,
+ * or network object -- only the two already-normalized reports -- and
+ * either returns a `ComparisonResult` or throws the same sanitized
+ * `ComparisonError` (`mixed_platform`) that `assertComparable` would.
+ *
+ * A function value cannot survive Astro's island-props JSON serialization
+ * for `client:load` hydration (verified directly during Phase 3F: an
+ * earlier draft that accepted a `compare` function as an island prop
+ * produced `"compare":[0,null]` in the built page's serialized props,
+ * which would throw at runtime post-hydration) -- so callers must import
+ * this function directly rather than receiving it as a prop from an
+ * `.astro` page.
+ */
+export function compareReports(older: NormalizedWebReport, newer: NormalizedWebReport): ComparisonResult {
+  if (older.platform === "kubernetes") {
+    if (newer.platform !== "kubernetes") {
+      throw new ComparisonError("mixed_platform");
+    }
+    return compareKubernetesReports(older, newer);
+  }
+  if (newer.platform !== "gitlab") {
+    throw new ComparisonError("mixed_platform");
+  }
+  return compareGitLabReports(older, newer);
 }

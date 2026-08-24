@@ -112,12 +112,50 @@ regardless of which milestone is currently in progress.
   `GL-BR-002`/`GL-BR-003`. The former per-platform `gitlab-demo` feature
   folder was removed in favor of the shared controller; `ReportWorkspace`
   was further generalized to render either a single report or a
-  `ComparisonResult`. **Phase 3F is not yet closed**: it requires
-  independent ZIP review and successful `CI`/`Web CI` runs against the
-  commit that will be created once this work is approved. The local report
-  explorer, the check catalogue and other product pages, the
-  contact/feedback endpoint(s), any Worker endpoint, and any
-  Cloudflare/deployment configuration remain **not yet implemented**.
+  `ComparisonResult`. **Phase 3F is closed**, on commit
+  `44baebd1224713d11ab9bb10f48bf46f0e1b7637` (`feat(web): add comparison
+  and executive summary`), for which both `CI` (run `32608091012`) and
+  `Web CI` (run `32608091018`) succeeded; Phase 3F's final committed web
+  Vitest test count was **319** (corrected from an earlier-recorded 318,
+  reflecting a `React` duplicate-key regression test added for
+  `ExecutiveSummary`'s recommendation list). **Phase 3G has implemented
+  `/explorer`, the local report explorer**: two labeled file inputs
+  (earlier/primary report, optional later report for comparison), each
+  imported through a new `src/features/local-report-explorer/` pipeline
+  (`importLocalReportFile.ts`: case-insensitive `.json`-extension check
+  before any read, `assertReportFileSize` before `File.text()`,
+  `JSON.parse`, then the existing `parseReport`) with sanitized errors and
+  a race-safe `useReportSlot` hook (per-slot generation counters so the
+  latest file selection always wins and `clear()` invalidates any
+  in-flight read). Comparison now goes through a `compareReports`
+  dispatcher shared between `DemoController` and the explorer (moved into
+  `src/features/comparison/compare.ts`, no duplicated platform-dispatch
+  logic); `ReportWorkspace` and `ExecutiveSummary` gained a `source:
+  "synthetic" | "local"` discriminant so the demo routes keep showing
+  "Synthetic demonstration" and the explorer shows "Local report", never a
+  report-derived label. Astro 7's native `security.csp` support is now
+  enabled, with a shared restrictive directive set
+  (`src/lib/reportRouteCsp.ts`: `connect-src 'none'` among eleven `'none'`
+  directives, plus Astro's own hash-based `script-src`/`style-src`, no
+  `unsafe-inline`/`unsafe-eval`) applied on `/explorer`,
+  `/demo/kubernetes`, and `/demo/gitlab`. A new `@playwright/test` dev
+  dependency (Chromium only; `@axe-core/playwright` and the full
+  cross-browser matrix remain Phase 3J) drives
+  `web/tests/e2e/local-report-explorer.spec.ts` against the real
+  production build, proving zero network requests/failures and zero
+  browser-storage/cookie/service-worker artifacts across a full
+  import/search/filter/sort/comparison/clear interaction; `web-ci.yml` now
+  installs Chromium and runs this suite after the production build, still
+  validation-only (it never deploys or publishes). Local Vitest coverage
+  is 381 tests (up from Phase 3F's 319). **Phase 3G is implemented but not
+  yet closed**: per this milestone's own process, a phase closes only
+  after independent ZIP review and a successful `CI`/`Web CI` run against
+  the approved commit, and no commit has been created for this work yet.
+  The check catalogue and other product pages, the contact/feedback
+  endpoint(s), any Worker endpoint, and any Cloudflare/deployment
+  configuration remain **not yet implemented**; full automated
+  accessibility (`axe`) scanning and the Firefox/WebKit legs of the
+  Playwright matrix remain Phase 3J.
   **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
   and v0.2.0 remain unchanged, released product capabilities; do not start
   AKS/EKS-specific code, cloud cost intelligence, a database, SaaS

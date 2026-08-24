@@ -47,7 +47,7 @@ function renderComparisonWorkspace() {
     [persistentFinding, newFinding],
   );
   const comparison = compareKubernetesReports(older, newer);
-  render(<ReportWorkspace mode="comparison" comparison={comparison} />);
+  render(<ReportWorkspace mode="comparison" source="synthetic" comparison={comparison} />);
   return comparison;
 }
 
@@ -167,7 +167,7 @@ describe("ReportWorkspace: comparison mode", () => {
 describe("ReportWorkspace: single mode does not render comparison controls", () => {
   it("renders no comparison-status filter, sort option, badges, or totals", () => {
     const report = buildNormalizedKubernetesReport({}, [persistentFinding]);
-    render(<ReportWorkspace mode="single" report={report} />);
+    render(<ReportWorkspace mode="single" source="synthetic" report={report} />);
 
     expect(screen.queryByLabelText("Comparison status")).not.toBeInTheDocument();
     expect(screen.queryByText("Comparison status")).not.toBeInTheDocument();

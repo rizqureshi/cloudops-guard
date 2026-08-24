@@ -71,7 +71,7 @@ function renderWorkspace() {
     },
     allFindings,
   );
-  return render(<ReportWorkspace mode="single" report={report} />);
+  return render(<ReportWorkspace mode="single" source="synthetic" report={report} />);
 }
 
 describe("ReportWorkspace", () => {
@@ -295,7 +295,7 @@ describe("ReportWorkspace: React key regression (identical findings in different
 
   function renderDuplicateCandidateWorkspace() {
     const report = buildNormalizedKubernetesReport({}, [alphaFinding, betaFinding]);
-    return render(<ReportWorkspace mode="single" report={report} />);
+    return render(<ReportWorkspace mode="single" source="synthetic" report={report} />);
   }
 
   function hasDuplicateKeyWarning(spy: ReturnType<typeof vi.spyOn>): boolean {

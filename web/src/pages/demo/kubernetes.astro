@@ -2,6 +2,7 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { DemoController } from "../../features/demo-controller";
 import { parseKubernetesReport } from "../../features/report-import";
+import { REPORT_ROUTE_CSP_DIRECTIVES } from "../../lib/reportRouteCsp";
 import earlierReportRaw from "../../data/synthetic-kubernetes-report.json";
 import laterReportRaw from "../../data/synthetic-kubernetes-report-later.json";
 
@@ -15,6 +16,14 @@ import laterReportRaw from "../../data/synthetic-kubernetes-report-later.json";
 // is a bug").
 const earlierReport = parseKubernetesReport(earlierReportRaw);
 const laterReport = parseKubernetesReport(laterReportRaw);
+
+// Restrictive Content-Security-Policy for this report-derived route -- see
+// ../../lib/reportRouteCsp.ts for the full rationale.
+for (const directive of REPORT_ROUTE_CSP_DIRECTIVES) {
+  // Non-null: `security.csp` is enabled globally in astro.config.mjs,
+  // so `Astro.csp` always exists on every prerendered page.
+  Astro.csp!.insertDirective(directive);
+}
 ---
 
 <BaseLayout

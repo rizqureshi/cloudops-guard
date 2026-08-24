@@ -16,6 +16,7 @@ import {
 } from "./filtering";
 import { FindingRow } from "./FindingRow";
 import "./report-workspace.css";
+import { REPORT_SOURCE_LABELS, type ReportSource } from "./reportSource";
 import { SORT_OPTIONS } from "./sorting";
 import {
   buildSingleReportItems,
@@ -25,9 +26,10 @@ import {
   type WorkspaceSortOption,
 } from "./workspaceItems";
 
-export type ReportWorkspaceProps =
+export type ReportWorkspaceProps = { readonly source: ReportSource } & (
   | { readonly mode: "single"; readonly report: NormalizedWebReport }
-  | { readonly mode: "comparison"; readonly comparison: ComparisonResult };
+  | { readonly mode: "comparison"; readonly comparison: ComparisonResult }
+);
 
 const SORT_LABELS: Readonly<Record<WorkspaceSortOption, string>> = {
   severity: "Severity",
@@ -115,6 +117,13 @@ function useFindingKeys(items: readonly WorkspaceItem[]): ReadonlyMap<Normalized
  * "Comparison status" sort option become available; and each finding row
  * shows its status as a labeled badge. None of this renders in single
  * mode, which is otherwise unchanged from Phase 3E.
+ *
+ * `source` (Phase 3G) is a narrow, application-controlled discriminant --
+ * never derived from report content -- selecting the visible source
+ * indicator via `REPORT_SOURCE_LABELS` (`./reportSource.ts`).
+ * `DemoController` always passes `"synthetic"`; the local report explorer
+ * always passes `"local"`. There is no prop that accepts an arbitrary
+ * label string.
  */
 export function ReportWorkspace(props: ReportWorkspaceProps) {
   const [filters, setFilters] = useState<WorkspaceFilterState>(DEFAULT_FILTER_STATE);
@@ -166,7 +175,9 @@ export function ReportWorkspace(props: ReportWorkspaceProps) {
 
   return (
     <div className="report-workspace">
-      <p className="status-label status-label--neutral report-workspace__badge">Synthetic demonstration</p>
+      <p className="status-label status-label--neutral report-workspace__badge">
+        {REPORT_SOURCE_LABELS[props.source]}
+      </p>
 
       <div className="report-workspace__identity">
         {displayTarget.platform === "kubernetes" ? (
