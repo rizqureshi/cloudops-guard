@@ -1,0 +1,180 @@
+[
+  {
+    "checkId": "K8S-RES-001",
+    "platform": "kubernetes",
+    "title": "Container has no CPU request",
+    "severity": "medium",
+    "triggerCondition": "A container definition does not set resources.requests.cpu.",
+    "evidenceDescription": "Identifies the container and its image, and states that resources.requests.cpu is not set.",
+    "impact": "Without a CPU request the scheduler cannot reserve capacity for the container, increasing the risk of CPU contention with other workloads on the same node.",
+    "recommendation": "Set resources.requests.cpu based on observed usage."
+  },
+  {
+    "checkId": "K8S-RES-002",
+    "platform": "kubernetes",
+    "title": "Container has no memory request",
+    "severity": "medium",
+    "triggerCondition": "A container definition does not set resources.requests.memory.",
+    "evidenceDescription": "Identifies the container and its image, and states that resources.requests.memory is not set.",
+    "impact": "Without a memory request the scheduler cannot reserve capacity for the container, increasing the risk of scheduling it onto an already memory-pressured node.",
+    "recommendation": "Set resources.requests.memory based on observed usage."
+  },
+  {
+    "checkId": "K8S-RES-003",
+    "platform": "kubernetes",
+    "title": "Container has no CPU limit",
+    "severity": "medium",
+    "triggerCondition": "A container definition does not set resources.limits.cpu.",
+    "evidenceDescription": "Identifies the container and its image, and states that resources.limits.cpu is not set.",
+    "impact": "Without a CPU limit the container can consume unbounded CPU on its node, starving other workloads during load spikes.",
+    "recommendation": "Set resources.limits.cpu to cap worst-case CPU usage."
+  },
+  {
+    "checkId": "K8S-RES-004",
+    "platform": "kubernetes",
+    "title": "Container has no memory limit",
+    "severity": "high",
+    "triggerCondition": "A container definition does not set resources.limits.memory.",
+    "evidenceDescription": "Identifies the container and its image, and states that resources.limits.memory is not set.",
+    "impact": "Without a memory limit the container can consume unbounded memory, risking node-level out-of-memory conditions that can evict or kill unrelated workloads.",
+    "recommendation": "Set resources.limits.memory to cap worst-case memory usage."
+  },
+  {
+    "checkId": "K8S-IMG-001",
+    "platform": "kubernetes",
+    "title": "Container image uses a mutable tag",
+    "severity": "high",
+    "triggerCondition": "A container's image reference uses the 'latest' tag, or has no tag at all, and is not pinned by digest.",
+    "evidenceDescription": "Identifies the container and its image reference, including the observed tag (or notes that none is present).",
+    "impact": "A mutable tag such as 'latest', or no tag at all, means the exact image content running today may differ from what runs after the next pod restart, undermining reproducibility, rollback safety, and supply-chain traceability.",
+    "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).",
+    "limitations": "A specific version tag (e.g. app:1.4.2) is a meaningful improvement over 'latest', but a tag can still be overwritten and re-pushed in the registry -- it is not itself a guarantee of immutability. Only a digest reference is truly content-addressed and immutable."
+  },
+  {
+    "checkId": "K8S-REL-001",
+    "platform": "kubernetes",
+    "title": "Container has an excessive restart count",
+    "severity": "high",
+    "triggerCondition": "A single container's restart count meets or exceeds a configurable threshold.",
+    "evidenceDescription": "States the container and pod, the observed restart count, the configured threshold, and (when known) the current waiting reason and/or last termination reason.",
+    "impact": "Frequent restarts typically indicate crash looping, failing health checks, or resource exhaustion, and reduce the reliability of the workload.",
+    "recommendation": "Inspect this container's events and state for the root cause (crash, OOMKill, failed probe) before increasing replica count or ignoring the symptom.",
+    "limitations": "The restart count is cumulative for the pod's current lifetime, not a time-windowed rate -- it is not evidence of how recently or how frequently the restarts occurred within a specific time window. Each container is evaluated independently: a pod is never flagged merely because several containers' individually-small counts add up to the threshold."
+  },
+  {
+    "checkId": "GL-BR-001",
+    "platform": "gitlab",
+    "title": "Default branch is not protected",
+    "severity": "high",
+    "triggerCondition": "No exact, wildcard, or inherited protected-branch rule matches the project's default branch.",
+    "evidenceDescription": "States the project path and default branch, and that no matching protected-branch rule was found.",
+    "impact": "An unprotected default branch permits force-push, deletion, and unreviewed direct pushes by anyone with push access. The default branch is typically the deployment/release source of truth.",
+    "recommendation": "Create a protected-branch rule whose name matches the default branch, with push and merge access restricted appropriately."
+  },
+  {
+    "checkId": "GL-BR-002",
+    "platform": "gitlab",
+    "title": "Force-push is allowed on the default branch",
+    "severity": "high",
+    "triggerCondition": "At least one protected-branch rule matching the default branch allows force-push (the most permissive matching rule wins).",
+    "evidenceDescription": "States the default branch and that the resolved effective force-push permission is 'allowed'.",
+    "impact": "Force-push on the default branch can rewrite or destroy commit history, obscure prior changes, and break collaborators relying on that history -- undermining any audit trail.",
+    "recommendation": "Disable 'Allowed to force push' on every protected-branch rule matching the default branch."
+  },
+  {
+    "checkId": "GL-BR-003",
+    "platform": "gitlab",
+    "title": "Developers can push directly to the default branch",
+    "severity": "medium",
+    "triggerCondition": "The Developer role-based direct-push permission is granted on at least one protected-branch rule matching the default branch (the most permissive matching rule wins).",
+    "evidenceDescription": "States the default branch and that a Developer role push-access grant was found on a matching rule.",
+    "impact": "Allowing direct pushes at the Developer role bypasses merge request review for a broad set of contributors, reducing change visibility.",
+    "recommendation": "Restrict default-branch push access to Maintainer or 'No one', and require changes via merge request.",
+    "limitations": "This reports a permission grant, not proof that a developer has actually pushed directly to the default branch. User-specific, group-specific, deploy-key-specific, and custom-role grants are not evaluated."
+  },
+  {
+    "checkId": "GL-MR-001",
+    "platform": "gitlab",
+    "title": "Successful pipelines are not required before merge",
+    "severity": "medium",
+    "triggerCondition": "The project's 'Pipelines must succeed' setting (only_allow_merge_if_pipeline_succeeds) is disabled. This is always evaluated, regardless of whether CI is currently configured for the project.",
+    "evidenceDescription": "States that the 'Pipelines must succeed' setting is disabled.",
+    "impact": "Merge requests can be merged even when a pipeline fails, so any configured tests, builds, or security scans cannot reliably gate merges while this setting is disabled.",
+    "recommendation": "Enable 'Pipelines must succeed' in the project's merge request settings."
+  },
+  {
+    "checkId": "GL-SEC-001",
+    "platform": "gitlab",
+    "title": "CI/CD pipeline details have broad visibility",
+    "severity": "high",
+    "triggerCondition": "The project's visibility is 'private' or 'internal', and 'Public pipelines' (public_jobs) is enabled.",
+    "evidenceDescription": "States the project's visibility and the audience that 'Public pipelines' exposes pipeline details to for that visibility level (all project members including Guests for 'private'; authenticated non-external users, including non-project members, for 'internal').",
+    "impact": "Pipeline logs, artifacts, and pipeline security scan information may be visible to a broader audience than intended for the project's visibility level.",
+    "recommendation": "Disable project-based pipeline visibility unless the broader audience is deliberate and approved.",
+    "limitations": "This check describes only the visibility state it evaluates -- that broader access is possible -- not that anyone has actually viewed pipeline details. Broad pipeline visibility may be an intentional, approved choice for the project, so this can be a false positive rather than a certain defect. CloudOps Guard never fetches pipelines, logs, artifacts, or security scan results itself."
+  },
+  {
+    "checkId": "GL-SEC-002",
+    "platform": "gitlab",
+    "title": "CI job tokens are permitted to push to the repository",
+    "severity": "high",
+    "triggerCondition": "The project setting for CI job token repository push (ci_push_repository_for_job_token_allowed) is enabled.",
+    "evidenceDescription": "States that CI job token repository push is enabled.",
+    "impact": "The CI job token is an ambient credential available to every pipeline job; if it can push to the repository, a compromised or malicious job gains a repository-write escalation path.",
+    "recommendation": "Disable this permission unless a specifically reviewed automation requires job-token repository push access."
+  },
+  {
+    "checkId": "GL-SEC-003",
+    "platform": "gitlab",
+    "title": "Pipeline-variable override permissions are more permissive than Maintainer",
+    "severity": "high",
+    "triggerCondition": "The project's pipeline-variable minimum override role (ci_pipeline_variables_minimum_override_role) is set to 'developer'.",
+    "evidenceDescription": "States that the pipeline-variable minimum override role is 'developer'.",
+    "impact": "A role less privileged than Maintainer can override pipeline variables at trigger time, which may allow injecting values into unsafely interpolated scripts or overriding security-relevant variables -- an authorization bypass risk.",
+    "recommendation": "Change the minimum pipeline-variable override role to Maintainer or a more restrictive value.",
+    "limitations": "This check never calls a CI/CD variables endpoint and never inspects the actual variable values or definitions -- it evaluates only the project's configured minimum override role."
+  },
+  {
+    "checkId": "GL-COST-001",
+    "platform": "gitlab",
+    "title": "Redundant pipelines are not automatically cancelled",
+    "severity": "low",
+    "triggerCondition": "The project's automatic cancellation of redundant pending pipelines (auto_cancel_pending_pipelines) is set to 'disabled'.",
+    "evidenceDescription": "States that automatic cancellation of redundant pending pipelines is disabled.",
+    "impact": "With automatic cancellation disabled, superseded pending pipelines may continue consuming runner capacity rather than being cancelled in favor of a newer run; interruptible running pipelines may also continue consuming runner capacity and compute time instead of being stopped when superseded.",
+    "recommendation": "Enable automatic cancellation of redundant, pending pipelines, unless the project intentionally requires every pipeline to run to completion for compliance or audit-history purposes."
+  },
+  {
+    "checkId": "GL-COST-002",
+    "platform": "gitlab",
+    "title": "Git clone depth is unlimited",
+    "severity": "low",
+    "triggerCondition": "The project's default Git clone depth (ci_default_git_depth) is 0 or unset (null) -- both of which GitLab treats as unlimited/full history.",
+    "evidenceDescription": "States the configured project default Git clone depth and that it resolves to unlimited/full history.",
+    "impact": "When this project default applies, CI jobs that obtain repository sources may fetch full history, potentially increasing network transfer, checkout duration, runner usage, and compute cost -- particularly for large or long-lived repositories. This configuration does not prove that additional cost, transfer, or delay actually occurred.",
+    "recommendation": "Set a bounded positive project default Git clone depth appropriate for the project's branching, tagging, and history requirements. Unlimited history may be intentional and legitimate for work such as versioning or changelog generation across complete tag/history information.",
+    "limitations": "This check evaluates only the project-level default Git clone depth. It does not inspect job-level or pipeline-level GIT_DEPTH variable overrides, which can set an effectively unlimited depth when the project default is bounded, or a bounded depth when the project default is unlimited."
+  },
+  {
+    "checkId": "GL-REL-001",
+    "platform": "gitlab",
+    "title": "Project job timeout exceeds a configurable threshold",
+    "severity": "medium",
+    "triggerCondition": "The project's configured job timeout (build_timeout) strictly exceeds an operator-supplied threshold.",
+    "evidenceDescription": "States the configured project job timeout and the configured audit threshold, both in seconds and as minutes/seconds.",
+    "impact": "An excessively long job timeout lets a hung job occupy a runner slot for longer, delaying feedback and potentially increasing compute cost.",
+    "recommendation": "Lower the project's default job timeout to a value appropriate for normal jobs, and use job-level timeout overrides only for legitimately long-running work.",
+    "limitations": "The threshold is a required, operator-configurable value supplied at audit time (--job-timeout-threshold-seconds) -- there is no universal product default. Projects with intentionally long builds may choose a higher threshold."
+  },
+  {
+    "checkId": "GL-CI-001",
+    "platform": "gitlab",
+    "title": "CI job or service container image uses a mutable tag or no tag",
+    "severity": "high",
+    "triggerCondition": "A CI job's or service's container image reference either (a) statically resolves to the 'latest' tag or no tag, and is not pinned by digest, or (b) is a dynamic, runtime-resolved (CI/CD variable) expression that cannot be statically verified.",
+    "evidenceDescription": "For a static reference, identifies the job (or the service and its job) and the observed image and tag. For a dynamic reference, states only that the image reference is dynamic and could not be statically verified -- the original expression and image string are never reproduced.",
+    "impact": "For a statically mutable image: the exact image content used by the CI job may differ from what ran previously or will run next time, undermining reproducibility, rollback safety, and supply-chain traceability -- a sharper risk than an equivalent finding on an idle workload, since CI images run with pipeline (and potentially CI job token) permissions. For a dynamic reference: its reproducibility, rollback safety, and supply-chain traceability cannot be verified from the CI configuration alone.",
+    "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...). For a dynamic reference, replace or constrain the CI/CD variable expression so the effective image reference can be statically verified.",
+    "limitations": "A dynamic reference cannot be statically verified, and this does not prove the effective image is unpinned -- only that CloudOps Guard cannot determine that statically. One finding is produced per (job, image-or-service) occurrence; the same mutable image used by two different jobs produces two separate findings."
+  }
+]

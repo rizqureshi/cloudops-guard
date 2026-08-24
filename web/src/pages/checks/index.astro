@@ -1,0 +1,28 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { CheckCatalogue } from "../../features/check-catalogue";
+import { CHECK_CATALOGUE } from "../../features/check-catalogue/catalogue";
+---
+
+<BaseLayout
+  title="Check catalogue — CloudOps Guard"
+  description={`Browse all ${CHECK_CATALOGUE.length} checks CloudOps Guard's Kubernetes and GitLab CI/CD audits implement today -- what each one looks for, why it matters, and how to fix it.`}
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Check catalogue</p>
+      <h1>Check catalogue</h1>
+      <p>
+        Every check CloudOps Guard's Kubernetes and GitLab CI/CD audits implement today &mdash;
+        {CHECK_CATALOGUE.length} in total. Each entry describes the condition a check looks for, why it
+        matters, and how to address it, sourced directly from the audit's own implementation.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container">
+      <CheckCatalogue client:load />
+    </div>
+  </section>
+</BaseLayout>

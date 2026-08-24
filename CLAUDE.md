@@ -146,13 +146,61 @@ regardless of which milestone is currently in progress.
   browser-storage/cookie/service-worker artifacts across a full
   import/search/filter/sort/comparison/clear interaction; `web-ci.yml` now
   installs Chromium and runs this suite after the production build, still
-  validation-only (it never deploys or publishes). Local Vitest coverage
-  is 381 tests (up from Phase 3F's 319). **Phase 3G is implemented but not
-  yet closed**: per this milestone's own process, a phase closes only
-  after independent ZIP review and a successful `CI`/`Web CI` run against
-  the approved commit, and no commit has been created for this work yet.
-  The check catalogue and other product pages, the contact/feedback
-  endpoint(s), any Worker endpoint, and any Cloudflare/deployment
+  validation-only (it never deploys or publishes). A focused correction
+  pass, before commit, fixed a real error-message disclosure bug in
+  `useReportSlot.ts` (it trusted `error.message` for any `instanceof
+  Error`, not just the two sanitized error classes, so an unexpected
+  rejection could leak a filename/path/report value) by checking
+  `instanceof LocalImportError || instanceof ReportValidationError`
+  explicitly. **Phase 3G is closed**, on commit
+  `1a1a9bb5cde8de18b689d7636666dac0a34fecd9` (`feat(web): add local report
+  explorer`), for which both `CI` (run `32682965675`) and `Web CI` (run
+  `32682965663`, including the Playwright Chromium install and its 5-test
+  run) succeeded; Phase 3G's final committed web test count was **383**
+  Vitest tests (up from Phase 3F's 319) plus **5** Chromium Playwright
+  end-to-end tests. **Phase 3H has implemented the product pages and the
+  17-check catalogue**: a project-owned
+  `web/src/data/check-catalogue.json`, Zod-validated (fails loudly on a
+  duplicate ID, invalid platform/severity, or missing text), verified
+  against the real Python check functions by a new
+  `tests/test_web_check_catalogue_contract.py` (calls
+  `evaluate_container`, `evaluate_container_restarts`,
+  `evaluate_protected_branch_checks` twice for the two mutually exclusive
+  `GL-BR-001` vs. `GL-BR-002`/`GL-BR-003` states,
+  `evaluate_project_setting_checks`, `evaluate_job_timeout_check`, and
+  `evaluate_ci_image_check` directly — never reimplementing a check's
+  condition or restating its expected title/severity). A searchable
+  `CheckCatalogue` island at `/checks` (search, platform/category/severity
+  filters, clear, live count, empty state; reuses the existing
+  `deriveCategory` utility rather than a second category mapping); 17
+  static `/checks/[id]` detail pages via `getStaticPaths`, no island;
+  `/roadmap`, `/learn` plus its two educational subpages
+  (`/learn/read-only-audits`, `/learn/local-report-privacy`, correctly
+  describing `File.text()`, never `FileReader`), and `/privacy` — all
+  static, zero islands. `/` was reworked to this document's §D order,
+  ending on an honest non-interactive "requesting a pilot" statement (no
+  form, no fake control) since `/request-demo` remains unimplemented, and
+  its former illustrative Critical-severity-badge preview (misleading,
+  since no implemented check reaches Critical) was replaced with a real
+  "anatomy of a finding" example built from the actual `K8S-IMG-001`
+  catalogue entry. Header/footer navigation gained Checks/Learn/Roadmap(/
+  Privacy), never `/request-demo` or `/feedback`. Production build
+  contains exactly the expected 27 routes; `/checks` has exactly one
+  island, every other new page has zero, and existing demo/explorer
+  island counts and CSP are unchanged. New tests: 29 pure catalogue-data/
+  filtering Vitest tests, 12 `CheckCatalogue` component tests, and 3
+  Python contract tests — 424 total Vitest tests (up from 383) and 1026
+  total pytest tests (up from 1023). A manual desktop/mobile Playwright
+  screenshot review caught and fixed one real bug before commit: two
+  `/privacy` paragraphs had inline links immediately preceded/followed by
+  a line break with no literal space, which Astro's compiler collapses to
+  zero width (unlike a browser's own whitespace collapsing) — fixed by
+  keeping the affected text and links on the same source line. **Phase 3H
+  is implemented but not yet closed**: per this milestone's own process, a
+  phase closes only after independent ZIP review and a successful
+  `CI`/`Web CI` run against the approved commit, and no commit has been
+  created for this work yet. The contact/feedback endpoint(s), any Worker
+  endpoint, Turnstile/email delivery, and any Cloudflare/deployment
   configuration remain **not yet implemented**; full automated
   accessibility (`axe`) scanning and the Firefox/WebKit legs of the
   Playwright matrix remain Phase 3J.

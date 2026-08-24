@@ -1,0 +1,130 @@
+/*
+  Check catalogue styles. Uses only the project-owned design tokens from
+  ../../styles/global.css -- no UI framework, no icon package, no chart
+  library, no remote font.
+*/
+
+.check-catalogue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.check-catalogue__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-sm);
+  align-items: end;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.check-catalogue__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+  min-width: 0;
+}
+
+.check-catalogue__field label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.check-catalogue__field input,
+.check-catalogue__field select {
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 0;
+}
+
+.check-catalogue__clear {
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  height: fit-content;
+}
+
+.check-catalogue__count {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.check-catalogue__empty {
+  padding: var(--space-md);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.check-catalogue__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.check-catalogue__item {
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+.check-catalogue__item-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.check-catalogue__check-id {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.check-catalogue__platform,
+.check-catalogue__category {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.check-catalogue__title {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-md);
+  color: var(--color-brand-600);
+  text-decoration: none;
+}
+
+.check-catalogue__title:hover {
+  text-decoration: underline;
+}
+
+.check-catalogue__trigger {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 40rem) {
+  .check-catalogue__controls {
+    grid-template-columns: 1fr;
+  }
+}

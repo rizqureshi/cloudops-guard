@@ -1,83 +1,29 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import { findCatalogueEntry } from "../features/check-catalogue/catalogue";
+
+// A real, currently-implemented check, used to illustrate what a finding
+// contains further down this page -- never a fabricated example. See
+// docs/milestones/v0.3.0-interactive-web-demo.md §H: no implemented check
+// reaches Critical severity, so the anatomy example below deliberately
+// uses a real High-severity check rather than inventing a Critical one.
+const anatomyExample = findCatalogueEntry("K8S-IMG-001");
+if (!anatomyExample) {
+  throw new Error("K8S-IMG-001 is missing from the check catalogue.");
+}
 ---
 
 <BaseLayout
   title="CloudOps Guard"
-  description="CloudOps Guard is a read-only auditing tool for Kubernetes and GitLab CI/CD. Explore interactive Kubernetes and GitLab demos, or open your own report.json in the local report explorer -- entirely in your browser."
+  description="CloudOps Guard is a read-only auditing tool for Kubernetes and GitLab CI/CD. Explore interactive Kubernetes and GitLab demos, browse the check catalogue, or open your own report.json in the local report explorer -- entirely in your browser."
 >
   <section class="hero">
     <div class="container container--narrow">
       <p class="status-label status-label--neutral">Web foundation preview</p>
       <h1>CloudOps Guard</h1>
       <p class="hero__lede">
-        Read-only auditing for Kubernetes and GitLab CI/CD &mdash; built to find
-        reliability, security, and cost issues without ever writing to the systems it
-        audits.
-      </p>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="capabilities-heading">
-    <div class="container">
-      <h2 id="capabilities-heading">Released capabilities</h2>
-      <p class="section__intro">
-        These two audits are implemented today, as a command-line tool you run
-        yourself against your own cluster or project.
-      </p>
-      <div class="card-grid">
-        <article class="card">
-          <h3>Kubernetes audit</h3>
-          <p>
-            Reviews namespaces, pods, deployments, and replica sets for missing
-            resource requests/limits, mutable image tags, and excessive container
-            restarts.
-          </p>
-        </article>
-        <article class="card">
-          <h3>GitLab CI/CD audit</h3>
-          <p>
-            Reviews a single GitLab project's branch protection, merge-request
-            policy, CI/CD settings, and job/service image references.
-          </p>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="section section--muted" aria-labelledby="read-only-heading">
-    <div class="container container--narrow">
-      <h2 id="read-only-heading">Read-only, by design</h2>
-      <p>
-        CloudOps Guard only ever reads. It never modifies, creates, patches, or
-        deletes a resource in an audited system, never retrieves Secret or ConfigMap
-        contents, and never collects container environment variable values,
-        application logs, or GitLab CI/CD variables.
-      </p>
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="milestone-heading">
-    <div class="container container--narrow">
-      <p class="status-label status-label--neutral">Current web milestone</p>
-      <h2 id="milestone-heading">Interactive Web Demo and Local Report Explorer</h2>
-      <p>
-        This site lets visitors explore CloudOps Guard's Kubernetes and GitLab checks
-        with synthetic example data, and open a <code>report.json</code> file the CLI
-        already produced &mdash; entirely inside their own browser, with the file
-        never uploaded anywhere.
-      </p>
-      <p>
-        Two interactive demonstrations are implemented, each using two fixed synthetic
-        scan states for the same fictional target &mdash; search, filter, sort, and
-        inspect findings, compare the earlier state to the later one to see
-        new/persistent/resolved findings, and switch to a deterministic executive
-        summary, entirely in your browser. The local report explorer opens one or two
-        <code>report.json</code> files the CLI already produced &mdash; also never
-        uploaded anywhere &mdash; and offers the same search/filter/sort/comparison/
-        executive-summary experience. A searchable check catalogue, other product
-        pages, and a contact form all arrive in later implementation phases. This site
-        has not been deployed, released, or published.
+        Read-only auditing for Kubernetes and GitLab CI/CD &mdash; built to find reliability,
+        security, and cost issues without ever writing to the systems it audits.
       </p>
       <p class="index-cta-group">
         <a class="cta" href="/demo/kubernetes">Explore Kubernetes &rarr;</a>
@@ -87,47 +33,150 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     </div>
   </section>
 
-  <section class="section section--muted" aria-labelledby="preview-heading">
+  <section class="section" aria-labelledby="capabilities-heading">
     <div class="container">
-      <h2 id="preview-heading">A preview of the visual language</h2>
+      <h2 id="capabilities-heading">Released capabilities</h2>
       <p class="section__intro">
-        These are illustrative design examples only &mdash; not results from a real or
-        synthetic audit.
+        These two audits are implemented today, as a command-line tool you run yourself against
+        your own cluster or project.
       </p>
-      <div class="card-grid" aria-label="Illustrative severity label examples">
-        <div class="card preview-card">
-          <p class="status-label status-label--critical">Critical</p>
-          <p class="preview-card__caption">Example severity label</p>
-        </div>
-        <div class="card preview-card">
-          <p class="status-label status-label--high">High</p>
-          <p class="preview-card__caption">Example severity label</p>
-        </div>
-        <div class="card preview-card">
-          <p class="status-label status-label--medium">Medium</p>
-          <p class="preview-card__caption">Example severity label</p>
-        </div>
-        <div class="card preview-card">
-          <p class="status-label status-label--low">Low</p>
-          <p class="preview-card__caption">Example severity label</p>
-        </div>
+      <div class="card-grid">
+        <article class="card">
+          <h3>Kubernetes audit (v0.1.0)</h3>
+          <p>
+            Reviews namespaces, pods, deployments, and replica sets for missing resource
+            requests/limits, mutable image tags, and excessive container restarts.
+          </p>
+        </article>
+        <article class="card">
+          <h3>GitLab CI/CD audit (v0.2.0)</h3>
+          <p>
+            Reviews a single GitLab project's branch protection, merge-request policy, CI/CD
+            settings, and job/service image references.
+          </p>
+        </article>
       </div>
+      <p class="section__cta">
+        <a href="/checks">Browse all checks &rarr;</a>
+      </p>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="roadmap-heading">
+  <section class="section section--muted" aria-labelledby="read-only-heading">
     <div class="container container--narrow">
-      <h2 id="roadmap-heading">What comes next</h2>
+      <h2 id="read-only-heading">What it reads, and what it never reads</h2>
       <p>
-        The interactive <a href="/demo/kubernetes">Kubernetes</a> and
-        <a href="/demo/gitlab">GitLab</a> demonstrations, browser-side report
-        comparison and an executive summary view, and the
-        <a href="/explorer">local report explorer</a> are the first of these to be
-        implemented. Later phases add: a searchable catalogue of every implemented
-        check, other product pages, and a separate, isolated contact form. Full
-        screen-reader/WCAG accessibility review and a broader browser test matrix are
-        also still to come. None of these other pieces exist on this site yet, and
-        this site has not been deployed, released, or published.
+        CloudOps Guard only ever reads. It never modifies, creates, patches, or deletes a resource
+        in an audited system.
+      </p>
+      <p>It never retrieves or collects:</p>
+      <ul>
+        <li>Kubernetes Secret or ConfigMap contents.</li>
+        <li>Kubernetes container environment-variable values or application logs.</li>
+        <li>GitLab CI/CD variables, job traces, logs, artifacts, credentials, or tokens.</li>
+      </ul>
+      <p class="section__cta">
+        <a href="/learn/read-only-audits">Read how it works &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="anatomy-heading">
+    <div class="container container--narrow">
+      <h2 id="anatomy-heading">What an audit finding contains</h2>
+      <p>
+        Every finding a CloudOps Guard audit produces has the same shape. Below is a real,
+        currently-implemented check, shown as an example &mdash; not a fabricated audit result.
+      </p>
+      <div class="card anatomy-card">
+        <div class="anatomy-card__header">
+          <span class={`status-label status-label--${anatomyExample.severity}`}>
+            {anatomyExample.severity.charAt(0).toUpperCase() + anatomyExample.severity.slice(1)}
+          </span>
+          <span class="anatomy-card__check-id">{anatomyExample.checkId}</span>
+        </div>
+        <h3>{anatomyExample.title}</h3>
+        <dl class="anatomy-card__fields">
+          <dt>Trigger condition</dt>
+          <dd>{anatomyExample.triggerCondition}</dd>
+          <dt>Evidence</dt>
+          <dd>{anatomyExample.evidenceDescription}</dd>
+          <dt>Impact</dt>
+          <dd>{anatomyExample.impact}</dd>
+          <dt>Recommendation</dt>
+          <dd>{anatomyExample.recommendation}</dd>
+        </dl>
+      </div>
+      <p>
+        Severity is one of four levels &mdash; <span class="status-label status-label--critical"
+          >Critical</span
+        >, <span class="status-label status-label--high">High</span>,
+        <span class="status-label status-label--medium">Medium</span>, and
+        <span class="status-label status-label--low">Low</span> &mdash; always shown as text, never by
+        colour alone. No currently implemented check reaches Critical severity; the highest severity
+        any check produces today is High.
+      </p>
+      <p class="section__cta">
+        <a href="/checks">See every check in the catalogue &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted" aria-labelledby="demos-heading">
+    <div class="container container--narrow">
+      <h2 id="demos-heading">Kubernetes and GitLab demonstrations</h2>
+      <p>
+        Two interactive demonstrations, each using two fixed synthetic scan states for the same
+        fictional target &mdash; search, filter, sort, and inspect findings, compare the earlier
+        state to the later one to see new/persistent/resolved findings, and switch to a
+        deterministic executive summary, entirely in your browser.
+      </p>
+      <p class="index-cta-group">
+        <a class="cta" href="/demo/kubernetes">Explore Kubernetes &rarr;</a>
+        <a class="cta" href="/demo/gitlab">Explore GitLab &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="explorer-heading">
+    <div class="container container--narrow">
+      <h2 id="explorer-heading">Local report explorer</h2>
+      <p>
+        Open one or two <code>report.json</code> files the CLI already produced, and explore them
+        the same way &mdash; also never uploaded anywhere, with the same
+        search/filter/sort/comparison/executive-summary experience.
+      </p>
+      <p class="index-cta-group">
+        <a class="cta" href="/explorer">Open Local Report Explorer &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted" aria-labelledby="roadmap-heading">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Current web milestone</p>
+      <h2 id="roadmap-heading">Honest roadmap</h2>
+      <p>
+        The interactive demonstrations, browser-side comparison and executive summary, the local
+        report explorer, and this check catalogue are implemented in this website's current build.
+        A contact/feedback path, full accessibility/cross-browser hardening, and deployment
+        configuration are still to come. <strong
+          >This site has not been deployed, released, or published.</strong
+        >
+      </p>
+      <p class="index-cta-group">
+        <a class="cta" href="/roadmap">View Roadmap &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pilot-heading">
+    <div class="container container--narrow">
+      <h2 id="pilot-heading">Requesting a pilot</h2>
+      <p>
+        A pilot-request and feedback path is planned but not implemented yet on this site &mdash;
+        there is no form, email address, or other contact control here to use in the meantime. Check
+        back once that work lands.
       </p>
     </div>
   </section>
@@ -149,6 +198,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     max-width: 42rem;
   }
 
+  .section__cta {
+    margin-top: var(--space-md);
+  }
+
   .index-cta-group {
     display: flex;
     flex-wrap: wrap;
@@ -162,16 +215,36 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     margin-top: var(--space-md);
   }
 
-  .preview-card {
+  .anatomy-card {
+    margin-block: var(--space-md);
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
     gap: var(--space-2xs);
   }
 
-  .preview-card__caption {
-    margin: 0;
-    font-size: var(--font-size-sm);
+  .anatomy-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .anatomy-card__check-id {
+    font-family: var(--font-family-mono);
     color: var(--color-text-muted);
+  }
+
+  .anatomy-card__fields {
+    margin: var(--space-2xs) 0 0;
+    display: grid;
+    gap: var(--space-3xs) var(--space-sm);
+  }
+
+  .anatomy-card__fields dt {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-muted);
+  }
+
+  .anatomy-card__fields dd {
+    margin: 0 0 var(--space-2xs);
   }
 </style>

@@ -1,0 +1,74 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Roadmap — CloudOps Guard"
+  description="An honest account of what CloudOps Guard has released, what is implemented in this website's build but not yet deployed, and what is still planned or absent."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Roadmap</p>
+      <h1>Roadmap</h1>
+      <p>
+        This page distinguishes three different kinds of "done": what has actually been released as a
+        command-line tool, what exists in this website's current build but has not been deployed, and
+        what is still planned or entirely absent. No date, commitment, subscription, or SaaS
+        availability is implied by anything below.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted" aria-labelledby="released-heading">
+    <div class="container container--narrow">
+      <h2 id="released-heading">Released CLI capabilities</h2>
+      <ul>
+        <li>
+          <strong>Kubernetes audit (v0.1.0)</strong> &mdash; a read-only command-line audit of a
+          cluster's namespaces, pods, deployments, and replica sets.
+        </li>
+        <li>
+          <strong>GitLab CI/CD audit (v0.2.0)</strong> &mdash; a read-only, single-project command-line
+          audit of branch protection, merge-request policy, CI/CD settings, and job/service image
+          references.
+        </li>
+      </ul>
+      <p>Both are available today as the <code>cloudops-guard</code> command-line tool.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="implemented-heading">
+    <div class="container container--narrow">
+      <h2 id="implemented-heading">Implemented in this website's build, not yet deployed</h2>
+      <p>
+        The following exist in this website's current source and build output. <strong
+          >None of it has been deployed, released, or published</strong
+        > &mdash; it is reachable only by someone running the build themselves.
+      </p>
+      <ul>
+        <li>Interactive Kubernetes and GitLab demonstrations, using fixed synthetic data.</li>
+        <li>Browser-side comparison between two scan states (new/persistent/resolved findings).</li>
+        <li>A deterministic, non-AI-generated executive summary view.</li>
+        <li>
+          A local report explorer that opens a <code>report.json</code> file the CLI already produced,
+          entirely in the browser, never uploaded.
+        </li>
+        <li>This searchable check catalogue and the product/educational pages around it.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section section--muted" aria-labelledby="planned-heading">
+    <div class="container container--narrow">
+      <h2 id="planned-heading">Still planned or absent</h2>
+      <ul>
+        <li>A contact/feedback path (a pilot-request form and a feedback form), isolated from report data.</li>
+        <li>Full automated accessibility scanning and a broader browser test matrix.</li>
+        <li>Deployment configuration, and an actual authorized deployment of this website.</li>
+        <li>AKS/EKS-specific integrations.</li>
+        <li>Broader cloud cost analysis beyond the two GitLab cost-efficiency checks already implemented.</li>
+      </ul>
+      <p>None of these exist yet in any form on this site.</p>
+    </div>
+  </section>
+</BaseLayout>

@@ -1,0 +1,49 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Privacy — CloudOps Guard"
+  description="A truthful description of what this website's current implementation does and does not do with data, as of Phase 3H -- before any production deployment."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Privacy</p>
+      <h1>Privacy</h1>
+      <p>
+        This page describes what this website's implementation actually does today. It is not a legal
+        privacy policy, and it makes no promise beyond what is described below.
+      </p>
+
+      <h2>Interactive demonstrations</h2>
+      <p>
+        The <a href="/demo/kubernetes">Kubernetes</a> and <a href="/demo/gitlab">GitLab</a> demonstration
+        pages use fixed, synthetic example data for a fictional project. This data is not real; it does
+        not describe any actual cluster, GitLab project, person, or organization.
+      </p>
+
+      <h2>The local report explorer</h2>
+      <p>
+        A <code>report.json</code> file you select in the <a href="/explorer">local report explorer</a> is
+        read and rendered entirely in your browser tab. See <a href="/learn/local-report-privacy"
+          >how the local report explorer keeps your report private</a
+        > for the exact mechanics.
+      </p>
+
+      <h2>What this site does not do</h2>
+      <ul>
+        <li>No analytics, session replay, or third-party tracking script runs on any page.</li>
+        <li>No endpoint on this site accepts an uploaded report, file, or credential.</li>
+        <li>No contact or feedback form exists on this site yet.</li>
+        <li>No production deployment of this v0.3.0 website has occurred.</li>
+      </ul>
+
+      <h2>Content-Security-Policy</h2>
+      <p>
+        The routes that can hold report-derived data &mdash; <a href="/demo/kubernetes">/demo/kubernetes</a>, <a href="/demo/gitlab">/demo/gitlab</a>, and <a href="/explorer">/explorer</a> &mdash; are served with a restrictive Content-Security-Policy, including <code>connect-src 'none'</code>, as a browser-enforced backstop against any network request those pages' code might otherwise issue.
+      </p>
+
+      <p><a href="/roadmap">See the roadmap</a> for what is planned or still absent.</p>
+    </div>
+  </section>
+</BaseLayout>

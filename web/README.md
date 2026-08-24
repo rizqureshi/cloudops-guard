@@ -7,16 +7,17 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3G &mdash; Local Report Explorer Privacy Boundary
+## Current phase: 3H &mdash; Product Pages and Check Catalogue
 
 The static web foundation (Phase 3B), the browser-side report-contract
 layer (Phase 3C), the Kubernetes and GitLab interactive demonstrations at
-`/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), and comparison
-plus the executive summary (Phase 3F) are unchanged in their route/content
-fundamentals; Phases 3B&ndash;3F are closed. **Phase 3G has implemented
-`/explorer`, a local `report.json` explorer, but is not yet closed** (see
-the milestone document for the exact closure gate). Phase 3F added
-comparison and an executive summary to both demo routes:
+`/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), comparison plus
+the executive summary (Phase 3F), and the local report explorer at
+`/explorer` (Phase 3G) are unchanged in their route/content fundamentals;
+Phases 3B&ndash;3G are closed. **Phase 3H has implemented the check
+catalogue and the remaining product/educational pages, but is not yet
+closed** (see the milestone document for the exact closure gate). Phase 3F
+added comparison and an executive summary to both demo routes:
 
 - A new, browser-only comparison feature
   ([`src/features/comparison/`](src/features/comparison/)), kept separate
@@ -119,11 +120,63 @@ Phase 3G adds a fourth route, `/explorer`, that opens one or two local
   and CSP-compatible hydration. Run it with `npm run test:e2e` (requires
   `npx playwright install chromium` once, and `npm run build` first).
 
+Phase 3H adds the check catalogue and the remaining product/educational
+pages:
+
+- A project-owned catalogue of all 17 currently implemented checks
+  ([`src/data/check-catalogue.json`](src/data/check-catalogue.json)),
+  loaded and Zod-validated at module-evaluation time (build/test time) --
+  a duplicate ID, invalid platform/severity, or missing required text
+  fails loudly rather than shipping. Verified against the real Python
+  check functions by a Python contract test
+  ([`../tests/test_web_check_catalogue_contract.py`](../tests/test_web_check_catalogue_contract.py)):
+  it calls `evaluate_container`, `evaluate_container_restarts`,
+  `evaluate_protected_branch_checks` (twice, since `GL-BR-001` and
+  `GL-BR-002`/`GL-BR-003` require two mutually exclusive
+  branch-protection states), `evaluate_project_setting_checks`,
+  `evaluate_job_timeout_check`, and `evaluate_ci_image_check` directly and
+  compares each check's ID/title/severity against the catalogue -- never
+  reimplementing a check's condition or restating its expected values in
+  a second hard-coded table.
+- A searchable catalogue island
+  ([`src/features/check-catalogue/`](src/features/check-catalogue/)) at
+  `/checks`: search by check ID/title, platform/category/severity
+  filters, a clear-filters action, a live "Showing X of 17 checks" count,
+  and an empty-results message. Reuses the existing `deriveCategory`
+  utility from `../report-workspace/category.ts` rather than a second
+  category mapping.
+- Seventeen static per-check detail pages at
+  [`src/pages/checks/[id].astro`](src/pages/checks/[id].astro), generated
+  via `getStaticPaths` from the catalogue data -- no React island on any
+  of them.
+- `/roadmap`, `/learn` (an index linking its two subpages),
+  `/learn/read-only-audits`, `/learn/local-report-privacy` (describing
+  the real `File.text()` -> `JSON.parse()` -> parser -> React-memory flow
+  the explorer actually uses -- explicitly not the older `FileReader`
+  API), and `/privacy` -- all static pages with zero islands.
+- `/` was reworked to follow the milestone document's §D information
+  order, ending on an honest, non-interactive "requesting a pilot"
+  statement (no form, no disabled fake control, no placeholder route)
+  since `/request-demo` remains unimplemented. Its former illustrative
+  severity-badge preview -- which showed a "Critical" badge even though
+  no currently implemented check reaches Critical severity -- was
+  replaced with a real "anatomy of a finding" example built directly from
+  the `K8S-IMG-001` catalogue entry, never a fabricated result.
+- Header navigation gained Checks/Learn/Roadmap; footer navigation gained
+  Checks/Learn/Roadmap/Privacy. Neither links to `/request-demo` or
+  `/feedback`, which remain unimplemented.
+
+The production build now contains exactly 27 routes (the 4 prior routes,
+`/checks`, the 17 detail pages, `/roadmap`, `/learn` plus its 2 subpages,
+and `/privacy`). `/checks` hydrates exactly one island
+(`CheckCatalogue`); every other Phase 3H page has zero islands; the
+existing demo/explorer island counts and their restrictive CSP are
+unchanged.
+
 The following remain **intentionally absent**, and arrive in later phases
 (see the milestone document, §R):
 
-- The check catalogue and other product pages (`/checks`, `/roadmap`, `/learn`, etc.).
-- The contact/feedback endpoint(s) or Worker source.
+- The contact/feedback endpoint(s) or Worker source (`/request-demo`, `/feedback`).
 - Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
   workflow.
 - Full automated accessibility (`axe`) scanning and the Firefox/WebKit
@@ -181,7 +234,10 @@ npm run test:e2e
   `ExecutiveSummary` internally) via `client:load`; `/explorer` hydrates
   exactly one island (`LocalReportExplorer`) via `client:load`, with no
   synthetic or default report serialized into its props (`props="{}"` in
-  the built output); no other route hydrates anything. `DemoController`
+  the built output); `/checks` hydrates exactly one island
+  (`CheckCatalogue`) via `client:load`; no other route, including every
+  `/checks/[id]` detail page and every Phase 3H product/educational page,
+  hydrates anything. `DemoController`
   deliberately never receives a
   function as a prop from its `.astro` page: Astro's island-props
   serialization is JSON-based, so a function value cannot survive

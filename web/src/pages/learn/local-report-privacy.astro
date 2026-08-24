@@ -1,0 +1,63 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="How the local report explorer keeps your report private — CloudOps Guard"
+  description="A precise explanation of the browser-only flow the local report explorer uses to read a selected report.json file, and why it never leaves your browser tab."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Learn</p>
+      <h1>How the local report explorer keeps your report private</h1>
+
+      <p>
+        The <a href="/explorer">local report explorer</a> lets you open a <code>report.json</code> file the
+        CLI already produced and explore it in your browser. Here is exactly what happens when you select
+        a file, with nothing simplified or omitted:
+      </p>
+
+      <ol>
+        <li>You select a file using an ordinary <code>&lt;input type="file"&gt;</code> control.</li>
+        <li>
+          The browser's <code>File.text()</code> method reads the file's contents as a string, entirely
+          within the browser &mdash; this is not the older <code>FileReader</code> API, though it serves
+          the same purpose.
+        </li>
+        <li>
+          That string is parsed with <code>JSON.parse()</code>.
+        </li>
+        <li>
+          The parsed data is validated against the same report schema the demonstration pages use, and
+          normalized into the explorer's internal representation.
+        </li>
+        <li>The resulting, normalized report is held only in React's in-memory component state.</li>
+        <li>The page renders that in-memory state &mdash; nothing further happens to the file.</li>
+      </ol>
+
+      <h2>What never happens</h2>
+      <ul>
+        <li>The file is never uploaded to any server.</li>
+        <li>No network request is initiated during import or while you interact with the explorer.</li>
+        <li>
+          No <code>localStorage</code>, <code>sessionStorage</code>, cookie, IndexedDB database, or
+          service-worker cache is used to store the file or the parsed report.
+        </li>
+        <li>The report is never encoded into the page's URL, as a query string, fragment, or otherwise.</li>
+        <li>No browsing history entry is created for an imported report.</li>
+        <li>Reloading or closing the browser tab clears whatever was imported.</li>
+        <li>The explorer never requests a kubeconfig file, a GitLab access token, or any other credential.</li>
+      </ul>
+
+      <h2>A browser-enforced backstop</h2>
+      <p>
+        In addition to the application code above never issuing a network request, the explorer route is
+        served with a restrictive Content-Security-Policy that includes <code>connect-src 'none'</code>.
+        This instructs the browser itself to block any network request the page's code might issue, so
+        the no-network guarantee does not rest on application code alone.
+      </p>
+
+      <p><a href="/learn">&larr; Back to Learn</a></p>
+    </div>
+  </section>
+</BaseLayout>

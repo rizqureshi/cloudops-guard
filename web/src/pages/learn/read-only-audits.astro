@@ -1,0 +1,48 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title={'What "read-only" means for a CloudOps Guard audit — CloudOps Guard'}
+  description="CloudOps Guard reads supported metadata and configuration and never creates, patches, deletes, or remediates a resource -- and what it deliberately never collects."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Learn</p>
+      <h1>What "read-only" means for a CloudOps Guard audit</h1>
+
+      <p>
+        CloudOps Guard reads the metadata and configuration its implemented checks need &mdash; for
+        example, a Kubernetes container's declared resource requests/limits and image reference, or a
+        GitLab project's protected-branch rules and CI/CD settings.
+      </p>
+
+      <p>
+        It never creates, patches, deletes, or otherwise remediates a resource in the system it audits.
+        Every check is read-only by construction: an audit run cannot change the cluster or project it
+        looks at, regardless of what it finds.
+      </p>
+
+      <h2>What is not collected</h2>
+      <ul>
+        <li>Kubernetes Secret or ConfigMap contents.</li>
+        <li>Kubernetes container environment-variable values.</li>
+        <li>Kubernetes application logs.</li>
+        <li>GitLab CI/CD variables (CloudOps Guard never calls a CI/CD variables endpoint).</li>
+        <li>GitLab job traces, logs, or artifacts.</li>
+        <li>GitLab credentials or tokens.</li>
+      </ul>
+
+      <h2>What a report represents</h2>
+      <p>
+        A CloudOps Guard report contains the findings produced by the checks that are actually
+        implemented today &mdash; it is not proof of comprehensive health, security, or compliance. The
+        absence of a finding for a given check is not proof that check ran and passed; and there may be
+        real issues no implemented check looks for yet. See the <a href="/checks">check catalogue</a> for
+        exactly what is evaluated.
+      </p>
+
+      <p><a href="/learn">&larr; Back to Learn</a></p>
+    </div>
+  </section>
+</BaseLayout>

@@ -1,0 +1,82 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { CHECK_CATALOGUE } from "../../features/check-catalogue/catalogue";
+import { deriveCategory } from "../../features/report-workspace/category";
+
+export function getStaticPaths() {
+  // One static path per catalogue entry, keyed by its exact check ID (e.g.
+  // "K8S-RES-001", "GL-CI-001") -- never a slugified or lowercased form.
+  // Exactly `CHECK_CATALOGUE.length` (17) paths are generated; an unknown
+  // check ID was never given a path, so it 404s rather than rendering.
+  return CHECK_CATALOGUE.map((entry) => ({
+    params: { id: entry.checkId },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const platformLabel = entry.platform === "kubernetes" ? "Kubernetes" : "GitLab";
+const category = deriveCategory(entry.checkId);
+const severityLabel = entry.severity.charAt(0).toUpperCase() + entry.severity.slice(1);
+---
+
+<BaseLayout
+  title={`${entry.checkId} — ${entry.title} — CloudOps Guard`}
+  description={`${entry.checkId}: ${entry.title}. ${entry.triggerCondition}`}
+>
+  <section class="section">
+    <div class="container container--narrow check-detail">
+      <p class="status-label status-label--neutral">{platformLabel} check</p>
+      <h1>{entry.title}</h1>
+
+      <div class="check-detail__meta">
+        <span class="check-detail__check-id">{entry.checkId}</span>
+        <span class={`status-label status-label--${entry.severity}`}>{severityLabel}</span>
+        <span class="check-detail__category">{category}</span>
+      </div>
+
+      <h2>Trigger condition</h2>
+      <p>{entry.triggerCondition}</p>
+
+      <h2>Evidence</h2>
+      <p>{entry.evidenceDescription}</p>
+
+      <h2>Impact</h2>
+      <p>{entry.impact}</p>
+
+      <h2>Recommendation</h2>
+      <p>{entry.recommendation}</p>
+
+      {
+        entry.limitations ? (
+          <>
+            <h2>Important limitations</h2>
+            <p>{entry.limitations}</p>
+          </>
+        ) : null
+      }
+
+      <p><a href="/checks">&larr; Back to the check catalogue</a></p>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .check-detail__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+
+  .check-detail__check-id {
+    font-family: var(--font-family-mono);
+    color: var(--color-text-muted);
+  }
+
+  .check-detail__category {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+  }
+</style>
