@@ -1,0 +1,96 @@
+/*
+  Contact-form styles. Uses only the project-owned design tokens from
+  ../../styles/global.css -- no UI framework, no icon package, no chart
+  library, no remote font. `.cta` (the submit button's shared class) is
+  defined globally.
+*/
+
+.contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: var(--container-narrow);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.contact-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3xs);
+}
+
+.contact-form__field label {
+  font-weight: var(--font-weight-medium);
+}
+
+.contact-form__optional {
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-muted);
+}
+
+.contact-form__field input[type="text"],
+.contact-form__field input[type="email"],
+.contact-form__field textarea {
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.contact-form__field textarea {
+  resize: vertical;
+  min-height: 8rem;
+}
+
+.contact-form__field--checkbox {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+}
+
+.contact-form__field--checkbox input {
+  margin-top: 0.2rem;
+}
+
+.contact-form__warning {
+  margin: 0;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-severity-medium);
+  border-radius: var(--radius-md);
+  background: var(--color-severity-medium-bg);
+  color: var(--color-severity-medium);
+  font-size: var(--font-size-sm);
+}
+
+.contact-form__disclosure {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.contact-form__turnstile-label {
+  font-weight: var(--font-weight-medium);
+}
+
+.contact-form__turnstile {
+  min-height: 65px;
+}
+
+.contact-form__turnstile-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.contact-form__status {
+  min-height: 1.5rem;
+}
+
+.contact-form__status p {
+  margin: 0;
+}

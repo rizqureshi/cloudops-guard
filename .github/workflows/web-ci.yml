@@ -47,6 +47,8 @@ jobs:
 
       - name: Production build
         run: npm run build
+        env:
+          PUBLIC_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium

@@ -34,3 +34,9 @@ web/dist/
 # Web (Playwright) generated files
 web/playwright-report/
 web/test-results/
+
+# Web local secrets (Phase 3I) -- .env.example is the only committed,
+# placeholder-only variant; never commit real local env/secret files.
+web/.env
+web/.env.local
+web/.dev.vars

@@ -1,0 +1,44 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { ContactForm } from "../features/contact-form";
+import { CONTACT_ROUTE_CSP_DIRECTIVES, CONTACT_ROUTE_SCRIPT_RESOURCES } from "../lib/contactRouteCsp";
+
+// Fails the build with a sanitized message if the public Turnstile site
+// key is not configured -- never a value dump, never the secret key (which
+// this page never reads at all; that lives only in Worker bindings).
+const siteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
+if (!siteKey) {
+  throw new Error(
+    "PUBLIC_TURNSTILE_SITE_KEY is not configured. Set it in web/.env (see web/.env.example) before building this route.",
+  );
+}
+
+for (const directive of CONTACT_ROUTE_CSP_DIRECTIVES) {
+  Astro.csp!.insertDirective(directive);
+}
+for (const resource of CONTACT_ROUTE_SCRIPT_RESOURCES) {
+  Astro.csp!.insertScriptResource(resource);
+}
+---
+
+<BaseLayout
+  title="Request a pilot — CloudOps Guard"
+  description="Request a CloudOps Guard pilot. This form sends a plain-text email to CloudOps Guard -- it is unrelated to, and never receives, any report.json data you explore on this site."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Request a pilot</p>
+      <h1>Request a pilot</h1>
+      <p>
+        Tell us a little about your team and what you'd like to audit, and we'll follow up by email. This form is
+        separate from, and never receives, any report you explore elsewhere on this site.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container container--narrow">
+      <ContactForm client:load formType="pilot_request" siteKey={siteKey} />
+    </div>
+  </section>
+</BaseLayout>

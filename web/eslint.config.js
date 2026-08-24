@@ -48,7 +48,23 @@ export default [
       ...reactPlugin.configs.flat["jsx-runtime"].rules,
       ...reactHooksPlugin.configs.flat["recommended-latest"].rules,
       ...jsxA11y.flatConfigs.recommended.rules,
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      // `argsIgnorePattern` covers intentionally unused callback
+      // parameters (e.g. `(_label, origin) => ...` in a `test.each`
+      // table). `ignoreRestSiblings` covers the narrower, specific case
+      // tests use repeatedly: `const { message: _message, ...rest } =
+      // VALID_PAYLOAD` to build a payload missing one field via object-
+      // rest destructuring -- it does not broadly exempt any unused `_`-
+      // prefixed variable in production code the way a `varsIgnorePattern`
+      // would.
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", ignoreRestSiblings: true }],
+      // TypeScript's own compiler (astro check) is the authoritative check
+      // for undefined identifiers, and understands type-only positions
+      // (e.g. `RequestInit`, `HTMLElement`) that base ESLint's `no-undef`
+      // does not -- `globals.browser` only lists runtime *values*, so a
+      // DOM/lib type used only as a TypeScript type annotation is a false
+      // positive here (Phase 3I: `RequestInit` in `worker/`/contact-form
+      // tests). This is the standard typescript-eslint recommendation.
+      "no-undef": "off",
     },
     settings: {
       react: { version: "19.2.8" },

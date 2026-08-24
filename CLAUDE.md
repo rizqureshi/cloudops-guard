@@ -196,12 +196,62 @@ regardless of which milestone is currently in progress.
   a line break with no literal space, which Astro's compiler collapses to
   zero width (unlike a browser's own whitespace collapsing) — fixed by
   keeping the affected text and links on the same source line. **Phase 3H
-  is implemented but not yet closed**: per this milestone's own process, a
-  phase closes only after independent ZIP review and a successful
-  `CI`/`Web CI` run against the approved commit, and no commit has been
-  created for this work yet. The contact/feedback endpoint(s), any Worker
-  endpoint, Turnstile/email delivery, and any Cloudflare/deployment
-  configuration remain **not yet implemented**; full automated
+  is closed**, on commit `959e3f1620d6fcc007d4e58695018f48a2612506`
+  (`feat(web): add product pages and check catalogue`), for which both
+  `CI` (run `32746176915`) and `Web CI` (run `32746176930`) succeeded;
+  Phase 3H's final committed counts were 424 Vitest tests, 5 Chromium
+  Playwright tests, and 1026 pytest tests. **Phase 3I has implemented the
+  contact and feedback boundary**: `/request-demo` and `/feedback`, each
+  hydrating exactly one `ContactForm` island, sharing a neutral, strict
+  Zod contract (`web/src/features/contact-form/contract.ts`: exactly
+  `formType`/`name`/`workEmail`/`company`/`message`/`consent`/
+  `turnstileToken`, unknown fields and inappropriate control characters
+  rejected, nothing ever truncated). A single isolated Worker endpoint,
+  `POST /api/contact` (`web/worker/contact.ts`, source only — not yet
+  deployed, no Wrangler config), enforces in order: exact path/method →
+  exact-match `Origin` (never suffix/wildcard/CORS-reflected) → exact
+  `application/json` Content-Type → rejected `Content-Encoding` → an
+  8 KiB body limit enforced twice (`readBoundedBody.ts`: a declared
+  oversized `Content-Length` rejected before any read, plus a bounded
+  incremental read that stops the instant actual bytes exceed the limit —
+  `request.text()`/`request.json()` are never called) → the shared
+  contract → mandatory server-side Turnstile verification
+  (`turnstile.ts`: one POST to the real Siteverify endpoint, hostname-
+  and `formType`-action-matched, bounded timeout, no visitor IP, no
+  retry, every failure mode sanitized to one `verification_failed`
+  response) → exactly one plain-text email via the structured
+  `EMAIL.send({ to, from, subject, text })` binding (`email.ts`:
+  recipient/sender/subject always fixed from Worker configuration, never
+  from submitted input — no visitor-controlled header/recipient/
+  attachment is possible, and no acknowledgement email is ever sent to
+  the visitor). A binding failure returns a sanitized
+  `503 temporarily_unavailable` response carrying the configured
+  destination address, which the client re-validates as a plain email
+  before building its own `mailto:` link (fixed subject only — never the
+  visitor's name, message, or token). A dedicated contact-route CSP
+  (`web/src/lib/contactRouteCsp.ts`) permits `'self'` and
+  `https://challenges.cloudflare.com` only — the sole external-script
+  exception anywhere on this site; a real bug was found and fixed here
+  during this phase's own manual review (Astro's `insertScriptResource`
+  silently drops its default `'self'` script-src source the instant any
+  custom resource is inserted, which broke both pages' own hydration
+  script under a real production build, caught via an actual
+  CSP-violation console error, not by inspection alone — fixed by
+  explicitly re-inserting `'self'`). An automated architectural-isolation
+  test builds a real import graph from the actual source files on disk
+  (never a hand-maintained list) proving the contact/Worker feature and
+  every report-related feature are mutually unreachable in both
+  directions — independently confirmed non-vacuous by injecting a
+  violating import and watching the test fail before reverting it. No new
+  dependency was added. Test coverage: 179 new Vitest tests for 603 total
+  (up from 424), plus 14 new Chromium Playwright tests for 19 total (up
+  from 5) — the original 5 report-explorer tests continue to pass
+  unchanged. **Phase 3I is implemented but not yet closed**: per this
+  milestone's own process, a phase closes only after independent ZIP
+  review and a successful `CI`/`Web CI` run against the approved commit,
+  and no commit has been created for this work yet. Real Cloudflare
+  account/domain/binding provisioning, Wrangler configuration, and any
+  deployment workflow remain **not yet implemented**; full automated
   accessibility (`axe`) scanning and the Firefox/WebKit legs of the
   Playwright matrix remain Phase 3J.
   **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0

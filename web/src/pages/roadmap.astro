@@ -54,6 +54,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           entirely in the browser, never uploaded.
         </li>
         <li>This searchable check catalogue and the product/educational pages around it.</li>
+        <li>
+          A <a href="/request-demo">pilot-request form</a> and a <a href="/feedback">feedback form</a>,
+          each backed by an isolated server-side endpoint with mandatory bot-verification and email
+          delivery &mdash; structurally isolated from report data (see <a href="/privacy">Privacy</a>)
+          and not yet connected to a real, deployed mail service.
+        </li>
       </ul>
     </div>
   </section>
@@ -62,9 +68,11 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="container container--narrow">
       <h2 id="planned-heading">Still planned or absent</h2>
       <ul>
-        <li>A contact/feedback path (a pilot-request form and a feedback form), isolated from report data.</li>
         <li>Full automated accessibility scanning and a broader browser test matrix.</li>
-        <li>Deployment configuration, and an actual authorized deployment of this website.</li>
+        <li>
+          Real Cloudflare account/domain/binding provisioning, deployment configuration, and an actual
+          authorized deployment of this website.
+        </li>
         <li>AKS/EKS-specific integrations.</li>
         <li>Broader cloud cost analysis beyond the two GitLab cost-efficiency checks already implemented.</li>
       </ul>

@@ -7,17 +7,19 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3H &mdash; Product Pages and Check Catalogue
+## Current phase: 3I &mdash; Contact and Feedback Boundary
 
 The static web foundation (Phase 3B), the browser-side report-contract
 layer (Phase 3C), the Kubernetes and GitLab interactive demonstrations at
 `/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), comparison plus
-the executive summary (Phase 3F), and the local report explorer at
-`/explorer` (Phase 3G) are unchanged in their route/content fundamentals;
-Phases 3B&ndash;3G are closed. **Phase 3H has implemented the check
-catalogue and the remaining product/educational pages, but is not yet
-closed** (see the milestone document for the exact closure gate). Phase 3F
-added comparison and an executive summary to both demo routes:
+the executive summary (Phase 3F), the local report explorer at
+`/explorer` (Phase 3G), and the check catalogue plus product/educational
+pages (Phase 3H) are unchanged in their route/content fundamentals;
+Phases 3B&ndash;3H are closed. **Phase 3I has implemented `/request-demo`
+and `/feedback`, an isolated `POST /api/contact` Worker endpoint, and the
+Turnstile/email-delivery/mailto-fallback behavior behind them, but is not
+yet closed** (see the milestone document for the exact closure gate).
+Phase 3F added comparison and an executive summary to both demo routes:
 
 - A new, browser-only comparison feature
   ([`src/features/comparison/`](src/features/comparison/)), kept separate
@@ -173,11 +175,100 @@ and `/privacy`). `/checks` hydrates exactly one island
 existing demo/explorer island counts and their restrictive CSP are
 unchanged.
 
+Phase 3I adds the contact and feedback boundary: `/request-demo`,
+`/feedback`, and an isolated Worker endpoint behind them.
+
+- A shared, reusable form island
+  ([`src/features/contact-form/`](src/features/contact-form/)), used on
+  both pages with a different `formType` (`"pilot_request"` /
+  `"feedback"`). A neutral, strict Zod contract
+  ([`contract.ts`](src/features/contact-form/contract.ts)) allows exactly
+  `formType`/`name`/`workEmail`/`company`/`message`/`consent`/
+  `turnstileToken` -- unknown fields, over-length values, non-literal
+  `consent`, and inappropriate control characters are all rejected
+  outright, never truncated -- and is imported by both the browser form
+  and the Worker, with zero dependency on any report-related feature (see
+  the automated isolation test below).
+- Explicit-rendering Cloudflare Turnstile integration
+  ([`turnstile.ts`](src/features/contact-form/turnstile.ts),
+  [`useTurnstile.ts`](src/features/contact-form/useTurnstile.ts)): the
+  official `challenges.cloudflare.com/turnstile/v0/api.js` script is
+  loaded at most once per page (`render=explicit`, an `onload`
+  query-parameter callback, no duplicate insertion on remount), reads
+  `PUBLIC_TURNSTILE_SITE_KEY` (the build fails with a sanitized error if
+  it is absent -- see [`.env.example`](.env.example)), and never exposes
+  a secret key to client code. Every attempted submission consumes and
+  resets the current token, so a retry always requires a fresh challenge.
+- A single isolated Worker endpoint,
+  [`worker/contact.ts`](worker/contact.ts) (`POST /api/contact`, source
+  only in this phase -- not deployed, no Wrangler configuration), which
+  enforces, in this exact order: exact path and method (query-string
+  variations and non-`POST` methods rejected) -> exact-match `Origin`
+  (parsed and compared to `request.url`'s own origin, never
+  suffix/substring/wildcard-matched, no CORS reflection) -> an exact
+  `application/json` Content-Type with no parameters -> a rejected
+  `Content-Encoding` -> an 8&nbsp;KiB body limit enforced twice
+  ([`worker/readBoundedBody.ts`](worker/readBoundedBody.ts): a declared
+  oversized `Content-Length` is rejected before any read, and a bounded
+  incremental read separately stops the instant actual bytes exceed the
+  limit, covering a chunked or dishonest/absent `Content-Length` alike --
+  `request.text()`/`request.json()` are never called) -> JSON parsing and
+  an object-shape check -> the shared contract -> mandatory server-side
+  Turnstile verification
+  ([`worker/turnstile.ts`](worker/turnstile.ts): one POST to the real
+  Siteverify endpoint, hostname- and `formType`-action-matched, a bounded
+  timeout, no visitor IP ever sent or retained, no caching, no retry on
+  an ambiguous response -- every failure mode collapses to one sanitized
+  `verification_failed` response) -> email delivery
+  ([`worker/email.ts`](worker/email.ts): exactly one plain-text email via
+  the structured `EMAIL.send({ to, from, subject, text })` binding, with
+  `to`/`from`/subject always fixed from Worker configuration or a fixed
+  per-`formType` subject table -- never from submitted input, so no
+  visitor-controlled header, recipient, CC/BCC, or attachment is
+  possible, and no acknowledgement email is ever sent to the visitor's
+  own address). A binding failure returns a sanitized
+  `503 temporarily_unavailable` response carrying the configured
+  destination address as a fallback; the client re-validates that value
+  as a plain email address before constructing its own `mailto:` link
+  (a fixed subject only -- never the visitor's name, message, or
+  Turnstile token). Every response is a fixed, sanitized JSON body
+  (`Content-Type`, `Cache-Control: no-store`,
+  `X-Content-Type-Options: nosniff`; never an echoed value, a Zod issue,
+  a Turnstile response, an email-binding error, or a stack trace); the
+  Worker contains no `console.log`/`console.error` anywhere.
+- A dedicated contact-route CSP
+  ([`src/lib/contactRouteCsp.ts`](src/lib/contactRouteCsp.ts)) permits
+  `'self'` and `https://challenges.cloudflare.com` only -- the sole
+  external-script exception anywhere on this site, and kept entirely
+  separate from [`reportRouteCsp.ts`](src/lib/reportRouteCsp.ts). Astro's
+  `insertScriptResource` silently drops its own default `'self'`
+  script-src source the instant *any* custom resource is inserted at
+  all (confirmed directly against Astro's `renderCspContent` source),
+  so both contact pages explicitly re-insert `'self'` alongside the
+  Turnstile origin -- discovered as a genuine hydration-breaking bug
+  during this phase's own manual review against a real production
+  build, not by inspection alone.
+- An automated architectural-isolation test
+  ([`tests/unit/contact-form/isolation.test.ts`](tests/unit/contact-form/isolation.test.ts))
+  builds a real import graph from the actual source files on disk (never
+  a hand-maintained list) and proves, in both directions, that the
+  contact/Worker feature and every report-related feature
+  (`report-import`, `report-workspace`, `local-report-explorer`,
+  `comparison`, `executive-summary`, `demo-controller`,
+  `check-catalogue`) are mutually unreachable, and that no report-related
+  source contains `/api/contact` or references `submitContactForm`.
+
+`/request-demo` and `/feedback` each hydrate exactly one island
+(`ContactForm`); every other route's island count and CSP are unchanged.
+No new dependency was added -- the Worker uses only standard
+Fetch-API-shaped types and local structural interfaces for its two custom
+bindings.
+
 The following remain **intentionally absent**, and arrive in later phases
 (see the milestone document, §R):
 
-- The contact/feedback endpoint(s) or Worker source (`/request-demo`, `/feedback`).
-- Any Cloudflare configuration (`wrangler.jsonc`, adapter, etc.) or deployment
+- Real Cloudflare account/domain/binding provisioning, Wrangler
+  configuration (`wrangler.jsonc`, adapter, etc.), or any deployment
   workflow.
 - Full automated accessibility (`axe`) scanning and the Firefox/WebKit
   legs of the Playwright matrix (Phase 3J).
@@ -196,6 +287,15 @@ milestone document, §N and Phase 3K).
 ## Commands
 
 Run all commands from this directory (`web/`).
+
+`npm run build`/`npm run dev`/`npm run test:e2e` require
+`PUBLIC_TURNSTILE_SITE_KEY` to be set (`/request-demo` and `/feedback`
+fail the build otherwise) -- copy [`.env.example`](.env.example) to
+`.env` first. For local development and CI, use Cloudflare's official,
+publicly documented always-passing test site key,
+`1x00000000000000000000AA` (a published testing identifier, not a
+secret) -- never a real site key or the real secret key in this
+repository.
 
 ```bash
 # Install exactly what package-lock.json specifies.
@@ -221,6 +321,8 @@ npm run preview
 
 # End-to-end tests (Playwright, Chromium only). Requires a production
 # build first (npm run build) and, once, npx playwright install chromium.
+# Turnstile and /api/contact are intercepted/mocked in these tests --
+# no real Turnstile verification or email is ever triggered.
 npm run test:e2e
 ```
 
@@ -235,9 +337,10 @@ npm run test:e2e
   exactly one island (`LocalReportExplorer`) via `client:load`, with no
   synthetic or default report serialized into its props (`props="{}"` in
   the built output); `/checks` hydrates exactly one island
-  (`CheckCatalogue`) via `client:load`; no other route, including every
-  `/checks/[id]` detail page and every Phase 3H product/educational page,
-  hydrates anything. `DemoController`
+  (`CheckCatalogue`) via `client:load`; `/request-demo` and `/feedback`
+  each hydrate exactly one island (`ContactForm`) via `client:load`; no
+  other route, including every `/checks/[id]` detail page and every
+  Phase 3H/3I product/educational page, hydrates anything. `DemoController`
   deliberately never receives a
   function as a prop from its `.astro` page: Astro's island-props
   serialization is JSON-based, so a function value cannot survive

@@ -1,0 +1,41 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { ContactForm } from "../features/contact-form";
+import { CONTACT_ROUTE_CSP_DIRECTIVES, CONTACT_ROUTE_SCRIPT_RESOURCES } from "../lib/contactRouteCsp";
+
+const siteKey = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
+if (!siteKey) {
+  throw new Error(
+    "PUBLIC_TURNSTILE_SITE_KEY is not configured. Set it in web/.env (see web/.env.example) before building this route.",
+  );
+}
+
+for (const directive of CONTACT_ROUTE_CSP_DIRECTIVES) {
+  Astro.csp!.insertDirective(directive);
+}
+for (const resource of CONTACT_ROUTE_SCRIPT_RESOURCES) {
+  Astro.csp!.insertScriptResource(resource);
+}
+---
+
+<BaseLayout
+  title="Feedback — CloudOps Guard"
+  description="Send feedback to CloudOps Guard. This form sends a plain-text email to CloudOps Guard -- it is unrelated to, and never receives, any report.json data you explore on this site."
+>
+  <section class="section">
+    <div class="container container--narrow">
+      <p class="status-label status-label--neutral">Feedback</p>
+      <h1>Feedback</h1>
+      <p>
+        Tell us what's working, what isn't, or what you'd like to see next. This form is separate from, and never
+        receives, any report you explore elsewhere on this site.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section--muted">
+    <div class="container container--narrow">
+      <ContactForm client:load formType="feedback" siteKey={siteKey} />
+    </div>
+  </section>
+</BaseLayout>
