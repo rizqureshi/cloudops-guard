@@ -245,7 +245,7 @@ export function ReportWorkspace(props: ReportWorkspaceProps) {
         )}
       </div>
 
-      <div className="report-workspace__summary" aria-label="Full report severity totals">
+      <div className="report-workspace__summary" role="group" aria-label="Full report severity totals">
         <span className="status-label status-label--critical">Critical {currentSeveritySummary.critical}</span>
         <span className="status-label status-label--high">High {currentSeveritySummary.high}</span>
         <span className="status-label status-label--medium">Medium {currentSeveritySummary.medium}</span>
@@ -254,7 +254,7 @@ export function ReportWorkspace(props: ReportWorkspaceProps) {
       </div>
 
       {isComparison ? (
-        <div className="report-workspace__summary" aria-label="Comparison status totals">
+        <div className="report-workspace__summary" role="group" aria-label="Comparison status totals">
           <span className="status-label status-label--new">New {props.comparison.statusTotals.new}</span>
           <span className="status-label status-label--persistent">
             Persistent {props.comparison.statusTotals.persistent}

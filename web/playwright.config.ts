@@ -1,9 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Phase 3G Playwright configuration: Chromium only. Phase 3J expands this
- * to Chromium, Firefox, and WebKit, and adds `@axe-core/playwright` --
- * neither is in scope here.
+ * Phase 3J expands Phase 3G's Chromium-only configuration to three desktop
+ * projects -- Chromium, Firefox, and WebKit -- and adds `@axe-core/
+ * playwright`-driven accessibility coverage (see `tests/e2e/
+ * accessibility.spec.ts`). Every existing functional spec now runs against
+ * all three engines by default via `npm run test:e2e`; a single project can
+ * still be targeted with `--project=<name>` for isolating a browser-specific
+ * failure.
  *
  * Runs against the **production build**, served by `astro preview` (a
  * real static file server), never `astro dev` -- Astro's native CSP
@@ -39,6 +43,14 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
     },
   ],
   webServer: {

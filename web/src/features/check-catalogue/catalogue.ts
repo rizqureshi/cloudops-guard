@@ -11,6 +11,8 @@
  * `../report-workspace/sorting.ts`.
  */
 
+import "../../lib/zodJitless";
+
 import rawCatalogue from "../../data/check-catalogue.json";
 import { compareOrdinal } from "../report-workspace/sorting";
 import { checkCatalogueSchema } from "./schema";

@@ -13,6 +13,8 @@
  * attributes are a UX convenience only, never the source of truth.
  */
 
+import "../../lib/zodJitless";
+
 import { z } from "zod";
 
 export const CONTACT_NAME_MAX_LENGTH = 100;

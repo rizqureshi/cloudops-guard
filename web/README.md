@@ -7,18 +7,32 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3I &mdash; Contact and Feedback Boundary
+## Current phase: 3J &mdash; Accessibility, Security and Release Readiness
 
 The static web foundation (Phase 3B), the browser-side report-contract
 layer (Phase 3C), the Kubernetes and GitLab interactive demonstrations at
 `/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), comparison plus
 the executive summary (Phase 3F), the local report explorer at
-`/explorer` (Phase 3G), and the check catalogue plus product/educational
-pages (Phase 3H) are unchanged in their route/content fundamentals;
-Phases 3B&ndash;3H are closed. **Phase 3I has implemented `/request-demo`
-and `/feedback`, an isolated `POST /api/contact` Worker endpoint, and the
-Turnstile/email-delivery/mailto-fallback behavior behind them, but is not
-yet closed** (see the milestone document for the exact closure gate).
+`/explorer` (Phase 3G), the check catalogue plus product/educational
+pages (Phase 3H), and the contact/feedback boundary at `/request-demo`
+and `/feedback` (Phase 3I) are unchanged in their route/content
+fundamentals; Phases 3B&ndash;3I are closed (Phase 3I on commit
+`e7428431`, with both `CI` and `Web CI` green). **Phase 3J has
+implemented automated `@axe-core/playwright` accessibility scanning
+across every route, a Chromium/Firefox/WebKit Playwright matrix, an
+automated product-quality spec, and a security/privacy/dependency/
+performance review, fixing three genuine cross-browser/accessibility
+defects found along the way. The three gates that genuinely require a
+person -- manual keyboard, screen-reader (VoiceOver), and literal 200%
+zoom review -- were personally completed by the project owner on
+2026-08-24 using Google Chrome Version 151.0.7922.173, each passing with
+no issues found; the accessibility/manual-review gate now reads Pass.
+Phase 3J is still not yet closed**, since closure separately requires
+independent review of the final package, a commit, and successful
+`CI`/`Web CI` runs against that commit (see
+[`../docs/reviews/v0.3.0-phase-3j-release-readiness.md`](../docs/reviews/v0.3.0-phase-3j-release-readiness.md)
+for full evidence, and the milestone document for the exact closure
+gate).
 Phase 3F added comparison and an executive summary to both demo routes:
 
 - A new, browser-only comparison feature
@@ -111,9 +125,9 @@ Phase 3G adds a fourth route, `/explorer`, that opens one or two local
   worker-src 'none'; media-src 'none'; manifest-src 'none'`, plus Astro's
   own hash-based `script-src`/`style-src`) applied on `/explorer`,
   `/demo/kubernetes`, and `/demo/gitlab`.
-- A new `@playwright/test` dev dependency (Chromium only for now --
-  `@axe-core/playwright` and the full cross-browser matrix are Phase 3J)
-  drives
+- A new `@playwright/test` dev dependency (Chromium only at the time --
+  `@axe-core/playwright` and the full Chromium/Firefox/WebKit matrix were
+  added in Phase 3J) drives
   [`tests/e2e/local-report-explorer.spec.ts`](tests/e2e/local-report-explorer.spec.ts)
   against the real production build (`npm run build` then Playwright's
   own `astro preview` webServer), proving zero network requests/failures
@@ -264,14 +278,55 @@ No new dependency was added -- the Worker uses only standard
 Fetch-API-shaped types and local structural interfaces for its two custom
 bindings.
 
-The following remain **intentionally absent**, and arrive in later phases
+As of the end of Phase 3I, the following remained intentionally absent;
+full automated accessibility (`axe`) scanning and the Firefox/WebKit legs
+of the Playwright matrix were subsequently added in Phase 3J (see below).
+The following still remain **intentionally absent**, and arrive in Phase 3K
 (see the milestone document, §R):
 
 - Real Cloudflare account/domain/binding provisioning, Wrangler
   configuration (`wrangler.jsonc`, adapter, etc.), or any deployment
   workflow.
-- Full automated accessibility (`axe`) scanning and the Firefox/WebKit
-  legs of the Playwright matrix (Phase 3J).
+
+## Phase 3J: accessibility, security and release readiness
+
+Phase 3J added automated `@axe-core/playwright` accessibility scanning
+across every one of the 29 production routes plus 12 representative
+interactive states, expanded the Playwright matrix from Chromium-only to
+Chromium/Firefox/WebKit (all three run by default via `npm run test:e2e`),
+and added an automated product-quality spec covering HTTP status,
+heading/landmark structure, title/description uniqueness, internal-link
+validity, console/page errors, island counts, viewport overflow, the skip
+link, keyboard operability, visible focus, reduced-motion behaviour, and
+colour-independent severity text
+([`tests/e2e/accessibility.spec.ts`](tests/e2e/accessibility.spec.ts),
+[`tests/e2e/product-quality.spec.ts`](tests/e2e/product-quality.spec.ts),
+[`tests/e2e/route-inventory.spec.ts`](tests/e2e/route-inventory.spec.ts),
+sharing one route inventory at
+[`tests/e2e/support/routes.ts`](tests/e2e/support/routes.ts)). This
+testing found and fixed three genuine production-code defects -- an
+ARIA-prohibited-attribute accessibility bug, a Firefox-only CSP console
+error from Zod's internal JIT-availability probe (fixed with
+[`src/lib/zodJitless.ts`](src/lib/zodJitless.ts), never by weakening any
+CSP), and a WebKit-only skip-link focus failure -- each with a non-vacuous
+regression test. A follow-up correction pass fixed a test-isolation gap
+that let one aggregate test reach the real Turnstile service (fixed with
+a file-level `beforeEach`) and added `npm audit --audit-level=high` as an
+enforced `Web CI` step. `@axe-core/playwright` is the only new
+dependency. **Automated** scripted, pointer-free keyboard interaction and
+a narrower-scope manual visual screenshot inspection (exact coverage
+stated precisely, not overstated) are recorded and pass. The three gates
+that genuinely require a person -- a manual keyboard review, a
+screen-reader spot-check (VoiceOver), and a literal 200% browser-zoom
+review -- were personally completed by the project owner on 2026-08-24
+using Google Chrome Version 151.0.7922.173, each reported as **Pass**
+with no issues found, recorded in
+[`../docs/reviews/v0.3.0-phase-3j-release-readiness.md`](../docs/reviews/v0.3.0-phase-3j-release-readiness.md),
+which also carries full §Q evidence, CSP/privacy/dependency-audit/
+performance findings, and exact test counts. **Phase 3J is implemented
+but not yet closed**: closure separately requires independent review of
+the final package, a commit, and successful `CI`/`Web CI` runs against
+that commit.
 
 **No production deployment is authorized in this phase or by anything in this
 directory.** Deployment requires a separate, explicit, later authorization (see the
@@ -319,8 +374,10 @@ npm run build
 # Preview the production build locally.
 npm run preview
 
-# End-to-end tests (Playwright, Chromium only). Requires a production
-# build first (npm run build) and, once, npx playwright install chromium.
+# End-to-end tests (Playwright: Chromium, Firefox, and WebKit, all by
+# default). Requires a production build first (npm run build) and, once,
+# npx playwright install --with-deps chromium firefox webkit. Add
+# --project=chromium (or firefox/webkit) to run a single engine.
 # Turnstile and /api/contact are intercepted/mocked in these tests --
 # no real Turnstile verification or email is ever triggered.
 npm run test:e2e

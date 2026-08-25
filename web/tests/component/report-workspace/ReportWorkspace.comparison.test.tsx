@@ -61,6 +61,17 @@ describe("ReportWorkspace: comparison mode", () => {
     expect(screen.getByText("Showing 3 of 3 findings.")).toBeInTheDocument();
   });
 
+  it("regression: exposes the severity/comparison-status totals as accessible groups, not a bare aria-labelled div", () => {
+    // A `<div>` with no explicit role has an implicit "generic" role, on
+    // which `aria-label` is prohibited by the ARIA spec and is ignored by
+    // assistive technology -- found by axe-core's `aria-prohibited-attr`
+    // rule during Phase 3J's accessibility scan. `role="group"` makes the
+    // label take effect, exactly like `getByRole` here proves.
+    renderComparisonWorkspace();
+    expect(screen.getByRole("group", { name: "Full report severity totals" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comparison status totals" })).toBeInTheDocument();
+  });
+
   it("shows the newer report's severity totals, not merged with resolved findings", () => {
     renderComparisonWorkspace();
     // newer.summary: persistentFinding (medium) + newFinding (high) only --

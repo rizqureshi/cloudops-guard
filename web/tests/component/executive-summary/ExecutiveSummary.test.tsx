@@ -31,6 +31,7 @@ describe("ExecutiveSummary: single-report Kubernetes", () => {
     expect(screen.getByText("demo-cluster")).toBeInTheDocument();
     expect(screen.getByText("All namespaces")).toBeInTheDocument();
     expect(screen.getByText("Total 1")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Severity totals" })).toBeInTheDocument();
     // "Resource management" appears in both the affected-categories entry
     // and the recommendation's category label.
     expect(screen.getAllByText("Resource management").length).toBeGreaterThan(0);
@@ -107,6 +108,15 @@ describe("ExecutiveSummary: comparison mode", () => {
     expect(screen.getByText("High 1")).toBeInTheDocument();
     expect(screen.getByText("Medium 1")).toBeInTheDocument();
     expect(screen.getByText("Total 2")).toBeInTheDocument();
+
+    // Regression: a `<div>` with no explicit role has an implicit
+    // "generic" role, on which `aria-label` is prohibited by the ARIA
+    // spec and is ignored by assistive technology -- found by axe-core's
+    // `aria-prohibited-attr` rule during Phase 3J's accessibility scan.
+    // `role="group"` makes the label take effect, exactly like
+    // `getByRole` here proves.
+    expect(screen.getByRole("group", { name: "Severity totals" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Comparison status totals" })).toBeInTheDocument();
   });
 
   it("excludes resolved findings from affected categories and recommendations", () => {

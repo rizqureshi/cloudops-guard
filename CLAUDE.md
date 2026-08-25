@@ -246,14 +246,125 @@ regardless of which milestone is currently in progress.
   dependency was added. Test coverage: 179 new Vitest tests for 603 total
   (up from 424), plus 14 new Chromium Playwright tests for 19 total (up
   from 5) — the original 5 report-explorer tests continue to pass
-  unchanged. **Phase 3I is implemented but not yet closed**: per this
-  milestone's own process, a phase closes only after independent ZIP
-  review and a successful `CI`/`Web CI` run against the approved commit,
-  and no commit has been created for this work yet. Real Cloudflare
-  account/domain/binding provisioning, Wrangler configuration, and any
-  deployment workflow remain **not yet implemented**; full automated
-  accessibility (`axe`) scanning and the Firefox/WebKit legs of the
-  Playwright matrix remain Phase 3J.
+  unchanged. A subsequent, focused CI-and-documentation-only correction
+  pass fixed `Web CI`'s missing `PUBLIC_TURNSTILE_SITE_KEY` build failure
+  (added step-scoped, using Cloudflare's public test key, to the
+  "Production build" step only) and corrected these Vitest figures from a
+  stale 149-new/573-total to the accurate 179-new/603-total shown above,
+  bringing Phase 3I's final tracked file count to 38 (`.github/workflows/
+  web-ci.yml` joined the previously reviewed 37). **Phase 3I is closed**,
+  on commit `e7428431890b90114b2b7ef22fe548445cb3dd9a` (`feat(web): add
+  contact and feedback boundary`), for which both `CI` (run `32764250097`)
+  and `Web CI` (run `32764250008`) succeeded — confirmed from the actual
+  logs: 1026 pytest, 603 Vitest across 38 files, 19 Chromium Playwright,
+  and a clean production build using the step-scoped public Turnstile test
+  key. **Phase 3J has implemented accessibility, security, and
+  release-readiness work**: automated `@axe-core/playwright` scanning
+  (`web/tests/e2e/accessibility.spec.ts`) across all 29 production routes
+  plus 12 representative interactive states (comparison results, the
+  executive summary, filtered/empty catalogue states, explorer error
+  states, contact validation/fallback states) with zero critical/serious
+  violations and zero unresolved `incomplete` results; the Playwright
+  matrix expanded from Chromium-only to Chromium/Firefox/WebKit (all three
+  desktop projects run by default via `npm run test:e2e`), with `Web CI`'s
+  browser-install step updated to match; a shared route inventory
+  (`web/tests/e2e/support/routes.ts`, deriving its 17 check-detail routes
+  from the real, Zod-validated check-catalogue data) backing a new
+  build-output coverage-proof test
+  (`web/tests/e2e/route-inventory.spec.ts`) and a new automated
+  product-quality spec (`web/tests/e2e/product-quality.spec.ts`, 42 tests)
+  covering HTTP status, heading/landmark structure, title/description
+  uniqueness, internal-link validity, console/page errors, island counts,
+  viewport overflow, the skip link, keyboard operability, visible focus,
+  reduced-motion behaviour, and colour-independent severity text. This
+  testing surfaced and fixed three genuine, previously-undetected defects
+  in production code, each with a non-vacuous regression test: an
+  `aria-prohibited-attr` violation (`aria-label` on a bare, role-less
+  `<div>` in `ReportWorkspace.tsx`/`ExecutiveSummary.tsx`, fixed with
+  `role="group"`); a Firefox-only CSP console error from Zod's internal
+  `new Function`-based JIT-availability probe (fixed by a new
+  `web/src/lib/zodJitless.ts` side-effect module calling Zod's own
+  `config({ jitless: true })` — Zod's upstream code explicitly
+  special-cases this "strict CSP" scenario — never by weakening any CSP);
+  and a WebKit-only skip-link failure (WebKit does not honor the
+  "sequential focus navigation starting point" heuristic Chromium/Firefox
+  use, so the skip link had no effect at all for WebKit keyboard users;
+  fixed with `tabindex="-1"` on `<main id="main-content">` in
+  `BaseLayout.astro`, the standard technique for this exact pattern,
+  confirmed to move focus correctly in all three engines — a narrower,
+  WebKit-only residual nuance on the *following* Tab press is recorded
+  honestly in `docs/reviews/v0.3.0-phase-3j-release-readiness.md` rather
+  than hidden or force-fixed). **Automated** scripted pointer-free
+  keyboard interaction (`page.keyboard.press()`, never a synthesized
+  click) across all three engines is recorded and passes — this is
+  automated test coverage, not a review performed by a person, and the
+  review document names it accordingly rather than calling it "manual."
+  A narrower-scope manual visual screenshot inspection (Chromium at
+  320px for four pages; WebKit at 320px/1440px for one page — the exact
+  scope is stated precisely in the review document, not overstated as
+  full cross-browser coverage) also passes. **On 2026-08-24, the project
+  owner personally completed all three of the genuine, person-performed
+  manual-review gates**, using Google Chrome Version 151.0.7922.173: a
+  genuine manual keyboard review (a person physically using only a
+  keyboard) — Pass, no issues found; a genuine screen-reader spot-check
+  (VoiceOver) — Pass, no issues found; and a literal 200%
+  browser-zoom/text-resize review (a real zoom control, distinct from the
+  320px-viewport proxy used for automated coverage) — Pass, no issues
+  found; recorded in `docs/reviews/v0.3.0-phase-3j-release-readiness.md`
+  as the owner's actual reported result, not expanded into fabricated
+  per-item findings, and never claiming Safari/Firefox/NVDA/Windows/mobile
+  assistive technology was reviewed (only Chrome was used). The overall
+  accessibility/manual-review §Q gate is therefore now **Pass**, not
+  "Partial" and no longer Blocked — this closes that one gate but does
+  not, by itself, close Phase 3J (see below). `npm audit --audit-level=high` and
+  `npm audit --omit=dev --audit-level=high` both report zero
+  vulnerabilities; CSP, privacy/isolation, and dependency/secret reviews
+  were performed directly against the real built `dist/` output (see the
+  review document for exact evidence) with no finding requiring a fix
+  beyond the three above. Local production-build performance was measured
+  (total `dist` 700 KB; first-party JS 325 KB across 10 files, first-party
+  CSS 13 KB across 2 files) and confirmed **not** a regression from
+  Phase 3I (a byte-for-byte comparison against a `git stash`-restored
+  Phase 3I build found only a 166-byte total increase from this phase's
+  fixes) — no Lighthouse or other performance dependency was added, and no
+  score beyond these local measurements is claimed. Web test coverage
+  after Phase 3J: 604 Vitest tests (up from 603) across the same 38 files,
+  and a Playwright suite that grew from 19 logical tests on Chromium only
+  to 103 logical tests run on **all three** browsers (103/103 on each of
+  Chromium, Firefox, and WebKit; 309/309 combined). Only one new
+  dependency was added, exactly as scoped: `@axe-core/playwright`. A
+  subsequent, focused correction pass fixed a genuine test-isolation gap
+  (`product-quality.spec.ts`'s cross-route title/description aggregate
+  test navigated to `/request-demo`/`/feedback` without the shared
+  Turnstile fake installed, letting real requests reach
+  `challenges.cloudflare.com`; fixed with a file-level `beforeEach` that
+  installs the fake for every test in that file, confirmed non-vacuous:
+  2 real external requests occurred before the fix, 0 after), corrected
+  this document's own accessibility-status terminology (scripted
+  Playwright keyboard interaction is automated evidence, never "manual
+  keyboard review"; the visual-inspection scope is now stated exactly
+  rather than overstated as full cross-browser coverage; since this
+  milestone's approved statuses are Pass/Fail/Blocked/Not yet applicable
+  and "Partial" is not one of them, at that stage the overall
+  accessibility gate was correctly recorded as **Blocked**, because the
+  required owner-operated evidence had not yet been supplied — see below
+  for the subsequent 2026-08-24 owner review that changed this gate to
+  **Pass**), corrected the owner-run screen-reader checklist to never
+  ask for a real contact-form submission (`/api/contact` is not
+  deployed or locally routed in Phase 3J), and added a
+  `npm audit --audit-level=high` step to `Web CI` (after `npm ci`),
+  enforcing the dependency-audit gate on every future web change rather
+  than leaving it as local-only evidence. A subsequent, documentation-only
+  pass then recorded the project owner's completed manual accessibility
+  evidence (see above) across all four status-bearing documents, changing
+  no production code, test, workflow, dependency, fixture, or route.
+  **Phase 3J is implemented but not yet closed**: per this milestone's own
+  process, a phase closes only after independent ZIP review and a
+  successful `CI`/`Web CI` run against the approved commit, and no commit
+  has been created for this work yet. Real Cloudflare account/domain/
+  binding provisioning, Wrangler configuration, and any deployment
+  workflow remain **not yet implemented** and are Phase 3K's
+  responsibility.
   **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
   and v0.2.0 remain unchanged, released product capabilities; do not start
   AKS/EKS-specific code, cloud cost intelligence, a database, SaaS

@@ -36,6 +36,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
       - name: Type/content check
         run: npm run check
 
@@ -50,8 +53,8 @@ jobs:
         env:
           PUBLIC_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
 
-      - name: End-to-end tests (Chromium)
+      - name: End-to-end tests (Chromium, Firefox, WebKit)
         run: npm run test:e2e

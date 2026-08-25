@@ -96,7 +96,7 @@ export function ExecutiveSummary({ summary, source }: ExecutiveSummaryProps) {
         <h2 id="exec-summary-totals-heading">
           {summary.mode === "single" ? "Total and severity counts" : "Newer scan totals"}
         </h2>
-        <div className="executive-summary__severity-bar" aria-label="Severity totals">
+        <div className="executive-summary__severity-bar" role="group" aria-label="Severity totals">
           <span className="status-label status-label--critical">
             Critical {summary.mode === "single" ? summary.summary.critical : summary.newerSummary.critical}
           </span>
@@ -120,7 +120,7 @@ export function ExecutiveSummary({ summary, source }: ExecutiveSummaryProps) {
               earlier scan are never merged into them; comparison-status totals are shown separately
               below.
             </p>
-            <div className="executive-summary__severity-bar" aria-label="Comparison status totals">
+            <div className="executive-summary__severity-bar" role="group" aria-label="Comparison status totals">
               <span className="status-label status-label--new">New {summary.statusTotals.new}</span>
               <span className="status-label status-label--persistent">
                 Persistent {summary.statusTotals.persistent}

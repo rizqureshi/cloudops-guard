@@ -16,6 +16,8 @@
  * is not a boolean, and so on).
  */
 
+import "../../lib/zodJitless";
+
 import { z } from "zod";
 
 import { MAX_FINDINGS_PER_REPORT } from "./constants";

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { compareReports } from "../comparison/compare";
 import { ComparisonError } from "../comparison/errors";
@@ -54,6 +54,22 @@ export function LocalReportExplorer() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("slot1");
   const [displayView, setDisplayView] = useState<DisplayView>("findings");
+
+  // Firefox specifically (found during Phase 3J's cross-browser testing --
+  // Chromium and WebKit do not do this) restores a `<input type="file">`
+  // element's displayed filename after a plain page reload, as part of its
+  // own form-data-restoration feature -- even though no real `File`/
+  // `FileList` content is ever restored (browsers never allow that, for
+  // security) and this component's own React state already starts fresh
+  // (`useReportSlot`'s state is never persisted anywhere -- see the
+  // module doc above). Explicitly clearing both inputs' `value` once on
+  // mount removes that purely cosmetic, contradictory leftover text
+  // ("No report imported yet." next to a still-displayed old filename)
+  // without affecting the real, already-correct absence of report data.
+  useEffect(() => {
+    if (input1Ref.current) input1Ref.current.value = "";
+    if (input2Ref.current) input2Ref.current.value = "";
+  }, []);
 
   const hasSlot1 = slot1.state.report !== null;
   const hasSlot2 = slot2.state.report !== null;
