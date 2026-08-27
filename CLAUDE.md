@@ -358,13 +358,36 @@ regardless of which milestone is currently in progress.
   pass then recorded the project owner's completed manual accessibility
   evidence (see above) across all four status-bearing documents, changing
   no production code, test, workflow, dependency, fixture, or route.
-  **Phase 3J is implemented but not yet closed**: per this milestone's own
-  process, a phase closes only after independent ZIP review and a
-  successful `CI`/`Web CI` run against the approved commit, and no commit
-  has been created for this work yet. Real Cloudflare account/domain/
-  binding provisioning, Wrangler configuration, and any deployment
-  workflow remain **not yet implemented** and are Phase 3K's
-  responsibility.
+  **Phase 3J is closed**, on commit
+  `7352a9aa17af9ba55f07cde1700ee1b72d5b65d0` (`feat(web): complete
+  accessibility and release readiness`), for which independent review of
+  the final package was completed and both `CI` (run `32797606973`) and
+  `Web CI` (run `32797606927`) succeeded — confirmed from the actual
+  logs: 1026 pytest, 604 Vitest across 38 files, a `Dependency audit`
+  step (`found 0 vulnerabilities`), a 29-page production build, and
+  103/103/103 Playwright per browser (309/309 combined), with zero
+  occurrences of `challenges.cloudflare.com` anywhere in the `Web CI`
+  log. **Phase 3K — Authorized Deployment and Release Preparation — is
+  now being prepared**: a dependency-free Node ESM renderer
+  (`web/deploy/render-wrangler-configs.mjs`) generates Wrangler
+  configuration for two independent Cloudflare deployment units (a
+  static-assets unit with no `main`, serving `web/dist` via Workers
+  Static Assets as a custom domain; a contact-API unit routing only the
+  exact `<hostname>/api/contact` path to the existing, unmodified
+  `web/worker/contact.ts`), both with `workers_dev: false` and
+  `preview_urls: false`, from strictly fail-closed-validated `DEPLOY_*`
+  environment variables only — no Cloudflare token, account ID, or the
+  Turnstile secret's value is ever read, required, or written.
+  `.github/workflows/deploy-web.yml` (manual `workflow_dispatch` only,
+  `contents: read`, exact confirmation-phrase and 40-hex-character-SHA
+  validation in a credential-free job gating a `production`-environment
+  deployment job, Wrangler pinned to `wrangler@4.102.0`) and
+  `docs/deployment/web-production.md` document a future, separately
+  authorized deployment procedure. **No commit has been created for this
+  work yet; no deployment, Cloudflare resource, tag, release, or
+  publication exists.** Phase 3K is not closed until this uncommitted
+  package passes independent review and a subsequently approved commit
+  passes `CI` and `Web CI`.
   **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
   and v0.2.0 remain unchanged, released product capabilities; do not start
   AKS/EKS-specific code, cloud cost intelligence, a database, SaaS

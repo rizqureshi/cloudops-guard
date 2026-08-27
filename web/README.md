@@ -7,32 +7,39 @@ CLI audits. See
 for the full design and scope reference, and [`../CLAUDE.md`](../CLAUDE.md) for
 durable, cross-project rules.
 
-## Current phase: 3J &mdash; Accessibility, Security and Release Readiness
+## Current phase: 3K &mdash; Authorized Deployment and Release Preparation
 
 The static web foundation (Phase 3B), the browser-side report-contract
 layer (Phase 3C), the Kubernetes and GitLab interactive demonstrations at
 `/demo/kubernetes` and `/demo/gitlab` (Phases 3D and 3E), comparison plus
 the executive summary (Phase 3F), the local report explorer at
 `/explorer` (Phase 3G), the check catalogue plus product/educational
-pages (Phase 3H), and the contact/feedback boundary at `/request-demo`
-and `/feedback` (Phase 3I) are unchanged in their route/content
-fundamentals; Phases 3B&ndash;3I are closed (Phase 3I on commit
-`e7428431`, with both `CI` and `Web CI` green). **Phase 3J has
-implemented automated `@axe-core/playwright` accessibility scanning
-across every route, a Chromium/Firefox/WebKit Playwright matrix, an
-automated product-quality spec, and a security/privacy/dependency/
-performance review, fixing three genuine cross-browser/accessibility
-defects found along the way. The three gates that genuinely require a
-person -- manual keyboard, screen-reader (VoiceOver), and literal 200%
-zoom review -- were personally completed by the project owner on
-2026-08-24 using Google Chrome Version 151.0.7922.173, each passing with
-no issues found; the accessibility/manual-review gate now reads Pass.
-Phase 3J is still not yet closed**, since closure separately requires
-independent review of the final package, a commit, and successful
-`CI`/`Web CI` runs against that commit (see
+pages (Phase 3H), the contact/feedback boundary at `/request-demo` and
+`/feedback` (Phase 3I), and accessibility/security/release-readiness
+(Phase 3J) are unchanged in their route/content fundamentals; Phases
+3B&ndash;3J are all closed (Phase 3J on commit `7352a9a`, with both `CI`
+and `Web CI` green — see
 [`../docs/reviews/v0.3.0-phase-3j-release-readiness.md`](../docs/reviews/v0.3.0-phase-3j-release-readiness.md)
-for full evidence, and the milestone document for the exact closure
-gate).
+for its full evidence, including the project owner's 2026-08-24
+Chrome-151.0.7922.173 manual keyboard/VoiceOver/200%-zoom review that
+closed its accessibility/manual-review gate). **Phase 3K is now being
+prepared**: Cloudflare deployment configuration for two independent
+units (a static-assets unit with no `main`, serving `dist/` via Workers
+Static Assets as a custom domain; a contact-API unit routing only the
+exact `<hostname>/api/contact` path to the existing, unmodified
+`worker/contact.ts`), a dependency-free config renderer
+(`deploy/render-wrangler-configs.mjs`), a manual-dispatch-only
+`.github/workflows/deploy-web.yml`, and
+[`../docs/deployment/web-production.md`](../docs/deployment/web-production.md)
+documenting the full future deployment procedure. **No commit has been
+created for this work yet, and no Cloudflare Worker, route, domain,
+preview, tag, release, or publication exists** — Phase 3K prepares
+deployment-ready configuration only; it does not deploy, publish, tag,
+or release anything, and no step in it runs Wrangler, contacts a
+Cloudflare API, or triggers `deploy-web.yml`. Phase 3K is not closed
+until this uncommitted package passes independent review and a
+subsequently approved commit passes `CI`/`Web CI` (see the milestone
+document for the exact closure gate).
 Phase 3F added comparison and an executive summary to both demo routes:
 
 - A new, browser-only comparison feature
@@ -323,10 +330,63 @@ using Google Chrome Version 151.0.7922.173, each reported as **Pass**
 with no issues found, recorded in
 [`../docs/reviews/v0.3.0-phase-3j-release-readiness.md`](../docs/reviews/v0.3.0-phase-3j-release-readiness.md),
 which also carries full §Q evidence, CSP/privacy/dependency-audit/
-performance findings, and exact test counts. **Phase 3J is implemented
-but not yet closed**: closure separately requires independent review of
-the final package, a commit, and successful `CI`/`Web CI` runs against
-that commit.
+performance findings, and exact test counts. **Phase 3J is closed**, on
+commit `7352a9aa17af9ba55f07cde1700ee1b72d5b65d0` (`feat(web): complete
+accessibility and release readiness`), for which independent review of
+the final package was completed and both `CI` (run `32797606973`) and
+`Web CI` (run `32797606927`) succeeded.
+
+## Phase 3K: authorized deployment and release preparation
+
+Phase 3K prepares Cloudflare deployment configuration for two
+independent units and documents a future, separately authorized
+deployment procedure -- it does not deploy anything. A dependency-free
+Node ESM renderer
+([`deploy/render-wrangler-configs.mjs`](deploy/render-wrangler-configs.mjs))
+generates two Wrangler configuration files from strictly validated
+`DEPLOY_*` environment variables only: a **static-assets unit** (no
+`main`, serves `dist/` through Workers Static Assets with
+`not_found_handling: "404-page"`, attached only to the configured
+hostname as a custom domain) and a **contact-API unit** (the existing,
+unmodified [`worker/contact.ts`](worker/contact.ts), routed only to the
+exact `<hostname>/api/contact` path, never a wildcard). Both units set
+`workers_dev: false` and `preview_urls: false`. Validation fails closed
+on missing/empty/malformed/placeholder/control-character/whitespace-
+surrounded/invalid-DNS/port/URL/path/wildcard/query/fragment values and
+on a hostname outside its zone (an exact dot-qualified suffix check --
+`hostname === zone` or `hostname.endsWith("." + zone)` -- deliberately
+never a naive `endsWith(zone)`, which would wrongly accept
+`notexample.com` for zone `example.com`). Output files are created
+exclusively (never overwriting an existing path or following a symlink),
+mode `0600`; a failed second file's creation removes the first file that
+same call created, so no partial pair is left behind. No Cloudflare API
+token, account ID, or the Turnstile secret's *value* is ever read,
+required, or written by this script -- the contact config only declares
+that `TURNSTILE_SECRET_KEY` must be provisioned, by name, out of band.
+
+[`../.github/workflows/deploy-web.yml`](../.github/workflows/deploy-web.yml)
+is manual-`workflow_dispatch`-only, `contents: read`, and requires an
+exact typed confirmation phrase plus a full 40-hex-character commit SHA,
+verified in a Cloudflare-credential-free `validate` job (dispatch ref is
+`main`, SHA format, checked-out `HEAD` matches it, and it is reachable
+from `origin/main`) before a `production`-GitHub-environment-gated
+`deploy` job can run at all; Wrangler is pinned to exactly
+`wrangler@4.102.0`; the generated configuration is removed in an
+`always()` step; no secret or generated configuration is ever echoed or
+uploaded as an artifact.
+[`../docs/deployment/web-production.md`](../docs/deployment/web-production.md)
+documents the full topology/privacy rationale, every environment
+variable and secret by name and classification, Cloudflare/Turnstile/
+Email-Routing prerequisites, the `production` environment's required
+protections, a pre-deployment checklist, a future post-deployment
+verification checklist, and the non-atomic two-unit deployment order with
+explicit failure-handling and recovery guidance -- including a deliberate
+statement that rollback has not yet been tested.
+
+**No commit has been created for this work yet, and no Cloudflare
+Worker, route, domain, preview, tag, release, or publication exists.**
+Phase 3K is not closed until this uncommitted package passes independent
+review and a subsequently approved commit passes `CI` and `Web CI`.
 
 **No production deployment is authorized in this phase or by anything in this
 directory.** Deployment requires a separate, explicit, later authorization (see the

@@ -1,0 +1,387 @@
+name: Deploy web (production)
+
+# Phase 3K -- FUTURE deployment configuration only. This workflow exists so
+# that a later, separately authorized deployment can be performed by
+# dispatching it manually; implementing/reviewing it does not run it, and
+# no step here executes automatically on push, pull request, schedule, or
+# any other event. See docs/deployment/web-production.md for the full
+# operator procedure and prerequisites -- nothing in this file deploys,
+# publishes, tags, or releases anything by itself.
+#
+# Two Cloudflare deployment units are rendered and deployed, in this fixed
+# order: (1) the static-assets unit (the built site, `web/dist`, served
+# through Workers Static Assets, no Worker code involved for a missing
+# asset); (2) the contact-API unit (the existing, unmodified
+# `web/worker/contact.ts`, routed only to the exact `<hostname>/api/contact`
+# path). See web/deploy/render-wrangler-configs.mjs for how their
+# configuration is generated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type exactly "DEPLOY-PRODUCTION" to confirm a real production deployment.'
+        required: true
+        type: string
+      commit_sha:
+        description: "Full 40-character commit SHA to deploy. Must be reachable from origin/main."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # A production deployment is never silently superseded by a second,
+  # concurrent dispatch -- the second run waits, it does not cancel the
+  # first one mid-deployment.
+  group: deploy-web-production
+  cancel-in-progress: false
+
+env:
+  REQUIRED_CONFIRMATION_PHRASE: "DEPLOY-PRODUCTION"
+  PINNED_WRANGLER_VERSION: "wrangler@4.102.0"
+
+jobs:
+  # No Cloudflare credential of any kind is available to this job -- it
+  # exists solely to prove the dispatch is legitimate before the
+  # deployment job (which does have credentials, via the protected
+  # `production` environment) is allowed to run at all.
+  validate:
+    name: Validate dispatch
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.normalize.outputs.commit_sha }}
+    steps:
+      - name: Require dispatch from the main branch
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "This workflow may only be dispatched from the main branch (got: $DISPATCH_REF)." >&2
+            exit 1
+          fi
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+
+      - name: Require the exact typed confirmation phrase
+        run: |
+          if [ "$INPUT_CONFIRMATION" != "$REQUIRED_CONFIRMATION_PHRASE" ]; then
+            echo "Confirmation input did not exactly match the required phrase." >&2
+            exit 1
+          fi
+        env:
+          INPUT_CONFIRMATION: ${{ github.event.inputs.confirmation }}
+
+      - name: Require a well-formed 40-character hexadecimal commit SHA
+        id: normalize
+        run: |
+          if ! [[ "$INPUT_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be exactly 40 hexadecimal characters." >&2
+            exit 1
+          fi
+          # Normalized to lowercase once here; every later step compares
+          # against this single normalized value via the job output above.
+          normalized="$(printf '%s' "$INPUT_COMMIT_SHA" | tr '[:upper:]' '[:lower:]')"
+          echo "commit_sha=$normalized" >>"$GITHUB_OUTPUT"
+        env:
+          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
+
+      - name: Check out the exact requested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.normalize.outputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out HEAD equals the requested commit
+        run: |
+          actual="$(git rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+          if [ "$actual" != "$EXPECTED_COMMIT_SHA" ]; then
+            echo "Checked-out HEAD does not equal the requested commit_sha." >&2
+            exit 1
+          fi
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.normalize.outputs.commit_sha }}
+
+      - name: Verify the commit is reachable from origin/main (an approved commit)
+        run: |
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$EXPECTED_COMMIT_SHA" origin/main; then
+            echo "The requested commit is not reachable from origin/main -- refusing to deploy an unapproved commit." >&2
+            exit 1
+          fi
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.normalize.outputs.commit_sha }}
+
+  # Credential-free release-readiness gates -- the equivalent of this
+  # project's existing `Web CI` workflow, run again here against the exact
+  # commit `validate` approved, so a deployment can never proceed on a
+  # commit that has not (re-)passed the same checks `Web CI` already
+  # enforces on `main`. No Cloudflare credential, no `TURNSTILE_SECRET_KEY`,
+  # no `production` environment -- this job uses only the same public
+  # Turnstile *test* site key `web-ci.yml` already uses for its own
+  # validation-only build, and it never renders a Wrangler config or
+  # invokes Wrangler.
+  validate_web:
+    name: Validate web release readiness
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Type/content check
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Production build (validation only -- public test Turnstile site key)
+        run: npm run build
+        env:
+          PUBLIC_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: End-to-end tests (Chromium, Firefox, WebKit)
+        run: npm run test:e2e
+
+  # Credential-free release-readiness gate -- the equivalent of this
+  # project's existing `CI` workflow, run again here against the exact
+  # commit `validate` approved. No Cloudflare credential, no secret of any
+  # kind, and no Wrangler/Cloudflare interaction.
+  validate_python:
+    name: Validate Python release readiness
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Build wheel and sdist
+        run: uv build
+
+  # The only job with Cloudflare credentials -- gated on `validate` above
+  # succeeding, on both credential-free release-readiness jobs above
+  # succeeding, and on the protected `production` GitHub environment's own
+  # approval/reviewer requirements (see docs/deployment/web-production.md
+  # for the required environment configuration: a reviewer other than the
+  # initiator, self-review prevented, main-only deployment branches, and
+  # administrator bypass disabled where the plan permits it).
+  deploy:
+    name: Deploy to production
+    needs: [validate, validate_web, validate_python]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Production build (real production Turnstile site key)
+        working-directory: web
+        # Deliberately the real production `PUBLIC_TURNSTILE_SITE_KEY`
+        # environment variable/secret from the `production` GitHub
+        # environment -- never Cloudflare's public *test* key that
+        # `web-ci.yml`'s validation-only build uses. This build is never
+        # reused from an earlier, test-key build.
+        run: npm run build
+        env:
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
+
+      - name: Create a private temporary directory for the generated Wrangler configs
+        id: config_dir
+        run: |
+          dir="$(mktemp -d "$RUNNER_TEMP/wrangler-config.XXXXXX")"
+          echo "path=$dir" >>"$GITHUB_OUTPUT"
+
+      - name: Render Wrangler configuration for both deployment units
+        # Reads only the DEPLOY_* variables below and two paths already
+        # present in this checkout (web/worker/contact.ts, web/dist) --
+        # see web/deploy/render-wrangler-configs.mjs. Never prints a path,
+        # a rendered value, or the generated JSON; on success it prints
+        # only a fixed, generic confirmation line.
+        run: node web/deploy/render-wrangler-configs.mjs
+        env:
+          DEPLOY_OUT_DIR: ${{ steps.config_dir.outputs.path }}
+          DEPLOY_HOSTNAME: ${{ vars.DEPLOY_HOSTNAME }}
+          DEPLOY_ZONE_NAME: ${{ vars.DEPLOY_ZONE_NAME }}
+          DEPLOY_STATIC_WORKER_NAME: ${{ vars.DEPLOY_STATIC_WORKER_NAME }}
+          DEPLOY_CONTACT_WORKER_NAME: ${{ vars.DEPLOY_CONTACT_WORKER_NAME }}
+          DEPLOY_CONTACT_TO_EMAIL: ${{ secrets.CONTACT_TO_EMAIL }}
+          DEPLOY_CONTACT_FROM_EMAIL: ${{ secrets.CONTACT_FROM_EMAIL }}
+          DEPLOY_WEB_ROOT: ${{ github.workspace }}/web
+
+      # -----------------------------------------------------------------
+      # The two eventual deployment commands. This phase (3K) prepares
+      # this configuration; it does not run it -- an actual production
+      # deployment happens only when a repository owner separately and
+      # explicitly dispatches this workflow, exactly as documented in
+      # docs/deployment/web-production.md. Deployment is intentionally
+      # non-atomic across the two units; see that document for ordering,
+      # failure-handling, and rollback guidance (rollback has not yet
+      # been tested).
+      # -----------------------------------------------------------------
+
+      - name: Deploy static-assets unit
+        working-directory: web
+        run: npx --yes "$PINNED_WRANGLER_VERSION" deploy --config "$STATIC_CONFIG_PATH"
+        env:
+          STATIC_CONFIG_PATH: ${{ steps.config_dir.outputs.path }}/wrangler.static.json
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy contact-API unit
+        working-directory: web
+        run: npx --yes "$PINNED_WRANGLER_VERSION" deploy --config "$CONTACT_CONFIG_PATH"
+        env:
+          CONTACT_CONFIG_PATH: ${{ steps.config_dir.outputs.path }}/wrangler.contact.json
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # TURNSTILE_SECRET_KEY is never provisioned here. It is a
+      # pre-existing Cloudflare Worker secret, set manually and out of
+      # band by an operator (`wrangler secret put TURNSTILE_SECRET_KEY`,
+      # run locally, never in CI -- see docs/deployment/web-production.md).
+      # This workflow never runs `wrangler secret put` for any secret.
+
+      - name: Remove the generated Wrangler configuration
+        if: always()
+        # Guards against a broad, unintended deletion target -- not with a
+        # textual prefix test (a `"$RUNNER_TEMP"/*` case match accepts
+        # `$RUNNER_TEMP/../outside-target`, since that string genuinely
+        # starts with `$RUNNER_TEMP/`), but by canonicalizing both
+        # `$RUNNER_TEMP` and `$CONFIG_DIR` with `realpath` and verifying
+        # the *resolved* target before ever calling `rm -rf`:
+        #   - an empty/absent `CONFIG_DIR`, or one that no longer exists
+        #     on disk, is a safe no-op;
+        #   - a literal `..` in the raw value is rejected outright, as a
+        #     first, cheap defense-in-depth check before canonicalizing;
+        #   - `$CONFIG_DIR` itself must not be a symlink (a symlink
+        #     sitting inside `$RUNNER_TEMP` that points *outside* it would
+        #     otherwise pass every other check here while `rm -rf`
+        #     followed it to delete something else entirely);
+        #   - the canonical target must not equal canonical `$RUNNER_TEMP`
+        #     itself (never delete the whole temp directory);
+        #   - the canonical target's direct parent must equal canonical
+        #     `$RUNNER_TEMP` exactly (rejects `$RUNNER_TEMP/../outside-
+        #     target`, which canonicalizes to a path whose parent is
+        #     `$RUNNER_TEMP`'s own parent, not `$RUNNER_TEMP` itself);
+        #   - the basename must match the `mktemp -d` template used to
+        #     create it above (`wrangler-config.*`), rejecting an
+        #     unrelated child directory of `$RUNNER_TEMP`.
+        # Only the fully-verified canonical path is ever passed to
+        # `rm -rf`. Never prints the path or the generated config
+        # contents.
+        run: |
+          if [ -z "$CONFIG_DIR" ]; then
+            echo "No temporary Wrangler config directory was recorded -- nothing to clean up." >&2
+            exit 0
+          fi
+
+          case "$CONFIG_DIR" in
+            *..*)
+              echo "Refusing to remove a cleanup path containing '..' -- possible path traversal." >&2
+              exit 1
+              ;;
+          esac
+
+          if [ ! -e "$CONFIG_DIR" ]; then
+            echo "The recorded temporary Wrangler config directory no longer exists -- nothing to clean up." >&2
+            exit 0
+          fi
+
+          if [ -L "$CONFIG_DIR" ]; then
+            echo "Refusing to remove a cleanup path that is itself a symlink." >&2
+            exit 1
+          fi
+
+          canonical_runner_temp="$(realpath -- "$RUNNER_TEMP")"
+          canonical_target="$(realpath -- "$CONFIG_DIR")"
+
+          if [ "$canonical_target" = "$canonical_runner_temp" ]; then
+            echo "Refusing to remove the runner's entire temporary directory." >&2
+            exit 1
+          fi
+
+          parent_dir="$(dirname -- "$canonical_target")"
+          if [ "$parent_dir" != "$canonical_runner_temp" ]; then
+            echo "Refusing to remove a cleanup path whose parent is not the runner's own temporary directory." >&2
+            exit 1
+          fi
+
+          base_name="$(basename -- "$canonical_target")"
+          case "$base_name" in
+            wrangler-config.*)
+              ;;
+            *)
+              echo "Refusing to remove a cleanup path with an unexpected name." >&2
+              exit 1
+              ;;
+          esac
+
+          rm -rf -- "$canonical_target"
+        env:
+          CONFIG_DIR: ${{ steps.config_dir.outputs.path }}
