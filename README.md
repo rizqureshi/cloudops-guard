@@ -682,3 +682,9 @@ Not implemented yet, planned for future milestones:
 - AKS/EKS-specific cloud integrations.
 - Broader cloud cost analysis.
 - A persistent, multi-tenant web dashboard.
+
+A versioned report-ingestion API and a command-line uploader are specified
+in a design document (v0.4.0) — see
+`docs/milestones/v0.4.0-ingestion-api.md`. Phase 4A is documentation and
+contract design only: no API, storage, authentication, or uploader code
+exists, and nothing is deployed.

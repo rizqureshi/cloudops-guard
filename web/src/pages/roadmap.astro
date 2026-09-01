@@ -60,6 +60,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           delivery &mdash; structurally isolated from report data (see <a href="/privacy">Privacy</a>)
           and not yet connected to a real, deployed mail service.
         </li>
+        <li>
+          Automated accessibility scanning (axe, across every route) and a three-browser
+          (Chromium/Firefox/WebKit) Playwright test matrix, run in CI on every change.
+        </li>
+        <li>
+          Deployment <em>configuration</em> for this website (a Wrangler configuration renderer and a
+          manually-dispatched, credential-gated GitHub Actions workflow) &mdash; this is configuration
+          only; see the next section for what remains genuinely absent.
+        </li>
       </ul>
     </div>
   </section>
@@ -68,15 +77,30 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="container container--narrow">
       <h2 id="planned-heading">Still planned or absent</h2>
       <ul>
-        <li>Full automated accessibility scanning and a broader browser test matrix.</li>
         <li>
-          Real Cloudflare account/domain/binding provisioning, deployment configuration, and an actual
-          authorized deployment of this website.
+          An actual, authorized production deployment of this website &mdash; real Cloudflare
+          account/domain/binding provisioning and dispatching the deployment workflow have not happened.
         </li>
         <li>AKS/EKS-specific integrations.</li>
         <li>Broader cloud cost analysis beyond the two GitLab cost-efficiency checks already implemented.</li>
+        <li>A persistent, multi-tenant dashboard for viewing uploaded reports over time.</li>
       </ul>
       <p>None of these exist yet in any form on this site.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="in-design-heading">
+    <div class="container container--narrow">
+      <h2 id="in-design-heading">Specified, not implemented</h2>
+      <p>
+        A versioned report-ingestion API and an explicit, customer-controlled command-line uploader are
+        specified in a published design document (v0.4.0, Phase 4A). <strong
+          >This phase is documentation and contract design only</strong
+        > &mdash; no API, storage, authentication, or uploader code exists, nothing is deployed, and this
+        website does not and will not itself upload a report; the design is a separate service, entirely
+        outside this site. See <a href="/privacy">Privacy</a> for how this website's own no-upload
+        behavior is unaffected.
+      </p>
     </div>
   </section>
 </BaseLayout>

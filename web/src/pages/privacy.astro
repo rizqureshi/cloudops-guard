@@ -4,7 +4,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 <BaseLayout
   title="Privacy — CloudOps Guard"
-  description="A truthful description of what this website's current implementation does and does not do with data, as of Phase 3I -- before any production deployment."
+  description="A truthful description of what this website's current implementation does and does not do with data, as of v0.3.0 -- before any production deployment."
 >
   <section class="section">
     <div class="container container--narrow">
@@ -61,6 +61,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <h2>Content-Security-Policy</h2>
       <p>
         The routes that can hold report-derived data &mdash; <a href="/demo/kubernetes">/demo/kubernetes</a>, <a href="/demo/gitlab">/demo/gitlab</a>, and <a href="/explorer">/explorer</a> &mdash; are served with a restrictive Content-Security-Policy, including <code>connect-src 'none'</code>, as a browser-enforced backstop against any network request those pages' code might otherwise issue. <a href="/request-demo">/request-demo</a> and <a href="/feedback">/feedback</a> are served with a separate, dedicated Content-Security-Policy that permits only this site itself and Cloudflare's official Turnstile origin (<code>challenges.cloudflare.com</code>) &mdash; the one external script permitted anywhere on this site.
+      </p>
+
+      <h2>A separate, future report-ingestion API</h2>
+      <p>
+        A versioned report-ingestion API and a command-line uploader are specified in a design document
+        (v0.4.0) &mdash; documentation and contract design only, with no code,
+        deployment, or live endpoint of any kind. That design is, and will remain, a service entirely
+        separate from this website: nothing on this site can or will call it, opening a report in the
+        local report explorer above will never trigger it, and this website's own behavior described on
+        this page does not change because of it. See the <a href="/roadmap">roadmap</a> for its current
+        status.
       </p>
 
       <p><a href="/roadmap">See the roadmap</a> for what is planned or still absent.</p>

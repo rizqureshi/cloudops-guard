@@ -383,16 +383,50 @@ regardless of which milestone is currently in progress.
   validation in a credential-free job gating a `production`-environment
   deployment job, Wrangler pinned to `wrangler@4.102.0`) and
   `docs/deployment/web-production.md` document a future, separately
-  authorized deployment procedure. **No commit has been created for this
-  work yet; no deployment, Cloudflare resource, tag, release, or
-  publication exists.** Phase 3K is not closed until this uncommitted
-  package passes independent review and a subsequently approved commit
-  passes `CI` and `Web CI`.
-  **Nothing has been deployed, released, or published for v0.3.0.** v0.1.0
-  and v0.2.0 remain unchanged, released product capabilities; do not start
-  AKS/EKS-specific code, cloud cost intelligence, a database, SaaS
-  multi-tenancy, authentication, billing or LLM integration until a
-  milestone explicitly calls for it — v0.3.0 does not call for any of those.
+  authorized deployment procedure. Phase 3K went through two further,
+  independently-reviewed correction passes after initial implementation
+  (nine findings, then four more — closing a transactional-write gap in
+  the config renderer, making the workflow's temp-directory cleanup
+  traversal-safe via `realpath` canonicalization rather than a textual
+  prefix match, replacing an ambiguous bootstrap-Wrangler-command
+  recommendation with an unambiguous dashboard-driven procedure, and
+  correcting report accounting) before being approved. **Phase 3K is
+  closed**, on commit `87376002553b24f21a0331c708986222a005a62d`
+  (`feat(web): prepare authorized production deployment`) on `main`,
+  `HEAD == origin/main`, for which both `CI` (run `33029176307`,
+  succeeded in 17s) and `Web CI` (run `33029176229`, succeeded in 6m35s —
+  full type-check/lint/unit-test/production-build/three-browser-
+  Playwright sequence) succeeded. **No deployment, Cloudflare resource,
+  tag, release, or publication exists** — this commit adds deployment
+  *configuration* only; `deploy-web.yml` has never been dispatched.
+  **v0.3.0 is now feature-complete (Phases 3A through 3K all committed
+  and pushed), but nothing has been deployed, released, or published for
+  it.** v0.1.0 and v0.2.0 remain unchanged, released product capabilities;
+  do not start AKS/EKS-specific code, cloud cost intelligence, a database,
+  SaaS multi-tenancy, authentication, billing or LLM integration for the
+  `web/` website beyond what v0.4.0 (below) explicitly calls for.
+- **The current approved milestone is v0.4.0: Versioned Ingestion API and
+  Customer-Controlled Uploader** — see
+  `docs/milestones/v0.4.0-ingestion-api.md` for its full objective, scope
+  and non-goals, privacy boundary, versioning contract, API contract,
+  authentication and tenant-isolation design, threat model, proposed
+  architecture (including storage interfaces and a request/data-flow
+  diagram), and phased plan (Phases 4B–4G). **Phase 4A — this milestone
+  document itself, this `CLAUDE.md` update, the roadmap update, and the
+  documentation/contract test suite proving the two are not allowed to
+  drift apart — is documentation and contract design only.** No API code,
+  storage provisioning, authentication code, uploader code, or deployment
+  infrastructure exists yet, and none of it is authorized to exist until a
+  later phase (4B onward) is separately approved. The ingestion API this
+  document designs is explicitly a **separate service and separate
+  security boundary from the `web/` website** — it is not, and must never
+  become, a new route on the existing Cloudflare Worker or Astro site, and
+  the v0.3.0 website's own "no report-ingestion endpoint" invariant (see
+  "Web application invariants" below) remains true of the website itself
+  regardless of anything v0.4.0 adds elsewhere. v0.4.0 does not call for
+  AKS/EKS-specific code, expanded cloud cost analysis, or a persistent
+  multi-tenant dashboard — see the milestone document's non-goals for the
+  complete list.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
@@ -407,8 +441,11 @@ regardless of which milestone is currently in progress.
 These apply from Phase 3B onward, now that v0.3.0 implementation has begun;
 see `docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
 
-- Report files a user selects are processed **locally in the browser only**
-  and are **never uploaded** to any server.
+- Report files a user selects **in the website's demo/explorer routes** are
+  processed **locally in the browser only** and are **never uploaded** to
+  any server. This is separate from, and unaffected by, the v0.4.0+
+  CLI-only uploader below — the website itself never uploads a report, and
+  nothing in `web/` may ever call the ingestion API.
 - The website must never accept customer credentials, a kubeconfig file, or a
   GitLab token as input.
 - Imported reports must never be persisted in `localStorage`, `sessionStorage`,
@@ -425,6 +462,135 @@ see `docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
   models already produce.
 - Production deployment is manual and requires explicit user authorization —
   never automatic on push or merge.
+
+## Ingestion API and uploader invariants (v0.4.0+)
+
+These apply once v0.4.0 ingestion-API/uploader implementation begins (Phase
+4B onward); see `docs/milestones/v0.4.0-ingestion-api.md` for full
+rationale. **Phase 4A is documentation and contract design only — none of
+the below is implemented yet.**
+
+- The ingestion API is a separate service and separate security boundary
+  from the public website — it must never be folded into `web/`'s Worker,
+  routes, or Astro build, and the website's own "never uploads a report"
+  invariant above must remain true regardless of the ingestion API's
+  existence.
+- Uploading a report is never automatic and never browser-triggered. It
+  requires a separate, explicit CLI command (`cloudops-guard upload`) with
+  explicit interactive confirmation, or a documented `--yes` flag for
+  non-interactive/CI use — selecting or opening a report file, in the CLI
+  or the website, must never itself cause network activity.
+- **No capabilities call, identity/authentication check, or upload
+  request may occur before an exact typed `UPLOAD` confirmation (or
+  `--yes`, which explicitly stands in for it)** — not even the
+  unauthenticated capabilities endpoint. `--dry-run` must exist, must
+  require no credential to be configured, and must perform full local
+  validation and print what would be sent — including a locally-computed
+  `report_fingerprint` (see below) — without ever making a network
+  request. The pre-upload summary must never print a server-derived
+  tenant name (the uploader has not contacted the server yet); an
+  optional local alias may be shown only if explicitly labeled as a
+  non-authoritative local label, never as a verified identity.
+- A non-interactive invocation without `--yes` or `--dry-run` must fail
+  closed with a clear error — never silently proceed and never hang.
+- Customer/tenant identity must be derived only from the authenticated
+  bearer token's server-side lookup — never trusted from a client-supplied
+  field in the request body, query string, or header naming a tenant. The
+  request envelope is a closed set of fields; an unknown top-level field
+  (including one that names an identity) is rejected outright, never
+  silently ignored.
+- Bearer tokens are structured as a non-secret, indexed `lookup_id` plus an
+  independently-random `secret` — never a single opaque value hashed as
+  the lookup key (a salted hash cannot itself be a deterministic lookup
+  key). Only `secret` is sensitive; it is never stored except as an
+  Argon2id hash, never in a recoverable form, and never embedded in a URL,
+  report body, log line, or the uploader's command line/shell history
+  (read only from `CLOUDOPS_GUARD_INGESTION_TOKEN` or a local credential
+  file, mirroring the existing `CLOUDOPS_GUARD_GITLAB_TOKEN`
+  env-var-only precedent). Customer-scoped, revocable effective on the
+  next request, minimum necessary scope per endpoint.
+- The report schema version and the API's major version (`/api/v1`) are
+  independent axes — never conflate a schema-version change with an
+  API-version change or vice versa.
+- Deterministic, machine-readable error codes only; never expose an
+  internal exception, stack trace, or infrastructure detail in an API
+  response.
+- Two independent size ceilings, never conflated: the maximum size of the
+  `report` field's own value (10 MiB, matching the existing
+  `MAX_REPORT_FILE_BYTES` used for local report import) and the maximum
+  size of the entire HTTP request body (the report ceiling plus a small,
+  fixed envelope-overhead allowance) — both enforced server-side, the
+  request-body ceiling checked first against both the declared
+  `Content-Length` and the actual bytes read, before attempting to parse
+  or store anything.
+- Before schema validation or fingerprinting, the JSON decoder must reject
+  a duplicate object-member name (at every object level, not the envelope
+  alone), a bare `NaN`/`Infinity`/`-Infinity` literal, malformed/invalid
+  Unicode, and any envelope field of the wrong type — in particular,
+  `report_schema_version` must be a JSON integer; a numeric string (e.g.
+  `"1"`) is invalid, never coerced.
+- Every ingestion is identified by a single deterministic
+  `report_fingerprint` (RFC 8785 canonicalization of `{platform,
+  report_schema_version, report}`, then SHA-256, computed only after the
+  strict-decode and schema checks above both succeed) — computable
+  identically, with no network round-trip, by the uploader and the server,
+  and used for idempotency. Never hash `report` content alone in isolation
+  from `platform`/`report_schema_version`.
+- Ingestion deduplication (by `report_fingerprint`, and by
+  `idempotency_key` when supplied) must be a single atomic
+  create-or-return-existing storage operation — never a separate
+  lookup-then-write pair, which cannot guarantee correctness under
+  concurrent requests for the same content. At most one `received` record
+  may exist per `(tenant_id, report_fingerprint)`, enforced at the storage
+  layer, even when two identical requests race each other.
+- A report's end-of-life is never claimed to be instantaneous, and is
+  never attributed to the wrong trigger: it is **retired** either by an
+  explicit customer `DELETE` request or, automatically, when its
+  retention period elapses with no such request — both produce the same
+  `retired` status and a `retired_at` timestamp (never a field name
+  implying a customer action that did not happen), distinguished only by
+  a `reason` (`customer_requested`/`retention_expired`). Physical,
+  irreversible purge of the underlying bytes (and, later, backups)
+  completes asynchronously, within a bounded window, after retirement —
+  the API response must never claim physical deletion before it has
+  actually occurred. A bounded post-purge tombstone keeps repeated
+  `DELETE` calls idempotent (and never overwrites an already-recorded
+  `reason`); once that tombstone itself expires, the ID becomes
+  indistinguishable from one that never existed.
+- `GET`/`DELETE` on an unknown `ingestion_id`, one that belongs to a
+  different tenant, one that has been retired (for either reason), and
+  one whose tombstone has since expired must all return the identical
+  response — never a distinguishable error that would let a caller
+  enumerate or probe another tenant's ingestion IDs or a past retirement.
+- Every error response uses one fixed, minimal envelope
+  (`{ok, error, request_id}`) with no exception for any error code —
+  an unsupported-schema-version error does not carry the set of supported
+  values; a client discovers those from `GET /api/v1/capabilities`
+  instead. Every endpoint's applicable 401/403/404/405/429/500 responses
+  are enumerated per endpoint, and any HTTP method other than the one(s)
+  an endpoint defines is `405 method_not_allowed` with an `Allow` header.
+- Authentication has three independent, layered abuse-protection tiers:
+  an inexpensive check *before* Argon2id is ever invoked, scoped to a
+  single `lookup_id` (so guessing secrets against one known-valid ID
+  cannot force unbounded expensive hashing); a broader, source-scoped
+  limit covering an unknown `lookup_id` and the unauthenticated
+  capabilities endpoint (neither has a token to scope a limiter against);
+  and the existing authenticated per-token limit, unchanged, applying only
+  after both of the above and Argon2id verification succeed. No vendor or
+  numeric production threshold is selected until an implementation phase.
+- Ingestion-service logs must never contain report content, a bearer token
+  value, or any request-body field beyond the fixed, documented allowlist
+  (`docs/milestones/v0.4.0-ingestion-api.md` §C) — mirroring this
+  project's existing "never log authentication headers" / "never log
+  report fields" discipline below.
+- Storage requirements once a concrete implementation exists: TLS in
+  transit for every hop; encryption at rest for metadata, reports, and
+  backups alike; least-privilege service credentials per store; bounded
+  backup deletion (a backup containing purged data must itself be rotated
+  out within a bounded window, never retained indefinitely); and an
+  explicit, recorded region/data-residency decision as a mandatory
+  precondition of any production deployment (Phase 4G) — never a default a
+  cloud provider's SDK happened to pick.
 
 ## Read-only invariant
 
