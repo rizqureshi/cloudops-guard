@@ -66,11 +66,13 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <h2>A separate, future report-ingestion API</h2>
       <p>
         A versioned report-ingestion API and a command-line uploader are specified in a design document
-        (v0.4.0) &mdash; documentation and contract design only, with no code,
-        deployment, or live endpoint of any kind. That design is, and will remain, a service entirely
-        separate from this website: nothing on this site can or will call it, opening a report in the
-        local report explorer above will never trigger it, and this website's own behavior described on
-        this page does not change because of it. See the <a href="/roadmap">roadmap</a> for its current
+        (v0.4.0) &mdash; documentation and contract design only, with no
+        deployment or live endpoint of any kind. A later, uncommitted, pending-review phase has added
+        local, in-memory reference storage code inside the CloudOps Guard Python package &mdash; still no
+        HTTP endpoint, no authentication, and nothing deployed. That design is, and will remain, a service
+        entirely separate from this website: nothing on this site can or will call it, opening a report in
+        the local report explorer above will never trigger it, and this website's own behavior described
+        on this page does not change because of it. See the <a href="/roadmap">roadmap</a> for its current
         status.
       </p>
 

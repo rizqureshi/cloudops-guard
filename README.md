@@ -686,5 +686,8 @@ Not implemented yet, planned for future milestones:
 A versioned report-ingestion API and a command-line uploader are specified
 in a design document (v0.4.0) — see
 `docs/milestones/v0.4.0-ingestion-api.md`. Phase 4A is documentation and
-contract design only: no API, storage, authentication, or uploader code
-exists, and nothing is deployed.
+contract design only. Phase 4B (uncommitted, pending review) has since
+added local, in-memory reference storage/token interfaces
+(`src/cloudops_guard/ingestion/`) — no HTTP API, no authentication, no
+uploader, no production storage, and no deployment exist, and nothing is
+deployed.

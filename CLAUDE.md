@@ -426,7 +426,39 @@ regardless of which milestone is currently in progress.
   regardless of anything v0.4.0 adds elsewhere. v0.4.0 does not call for
   AKS/EKS-specific code, expanded cloud cost analysis, or a persistent
   multi-tenant dashboard — see the milestone document's non-goals for the
-  complete list.
+  complete list. **Phase 4B has implemented the storage and token
+  interfaces Phase 4A's §H designs, together with deterministic local,
+  in-memory reference implementations**, under a new
+  `src/cloudops_guard/ingestion/` package: `IngestionRecord`/
+  `Tombstone`/`TokenRecord` domain types; the `MetadataStore`,
+  `ReportBlobStore`, `TokenStore`, and `AttemptLimiter` interfaces as
+  Python ABCs; and `InMemoryMetadataStore`/`InMemoryReportBlobStore`/
+  `InMemoryTokenStore`/`InMemoryAttemptLimiter` reference
+  implementations — including `InMemoryMetadataStore`'s single-lock
+  atomic `create_or_get_received` (never a separate lookup-then-write),
+  the fixed non-sliding 24-hour idempotency-key window, lazy
+  (non-background-swept) tombstone expiry, and the full
+  received→retired→deleted lifecycle; and index-corruption prevention in
+  `create_or_get_received` (an `IngestionIdConflict` is raised, before
+  any store mutation, if a `new_ingestion_id` collides with a different
+  tenant-scoped identity — live, retired, or still-tombstoned). `TokenStore`
+  is the complete, approved three-method interface (`lookup`,
+  `verify_secret`, `mark_revoked`); `InMemoryTokenStore.verify_secret`
+  delegates entirely to an injected `SecretVerifier` `Protocol` callable
+  — this class performs no hashing or comparison itself, so real
+  Argon2id-backed verification remains Phase 4C work, and a test injects
+  only a deterministic fake. `InMemoryMetadataStore.mark_retired`/
+  `mark_purged` construct and validate the complete candidate record (and,
+  for purge, its `Tombstone`) via the normal, validating constructor
+  before mutating any store state — never `model_copy(update=...)`, which
+  does not validate. **None of this is production storage, an HTTP API,
+  authentication, or a real credential**: no database, object store,
+  secret manager, HTTP framework, cloud SDK, or network dependency was
+  added; no ingestion API endpoint, uploader, or deployment exists;
+  nothing is durable beyond process memory. No new dependency was added.
+  This work is **uncommitted**, pending independent review; it does not
+  authorize Phase 4C (an HTTP API), production storage, credentials,
+  deployment, tagging, or a release.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
@@ -467,8 +499,16 @@ see `docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
 
 These apply once v0.4.0 ingestion-API/uploader implementation begins (Phase
 4B onward); see `docs/milestones/v0.4.0-ingestion-api.md` for full
-rationale. **Phase 4A is documentation and contract design only — none of
-the below is implemented yet.**
+rationale. **Phase 4A was documentation and contract design only. Phase 4B
+(uncommitted; see above) has implemented local, in-memory reference
+storage/token interfaces (`src/cloudops_guard/ingestion/`) satisfying the
+storage-layer mechanics some of the invariants below describe — atomic
+create-or-return-existing, the idempotency window, and the retirement/
+purge/tombstone lifecycle are now real, tested Python code. No HTTP API,
+no authentication (Argon2id or otherwise), no uploader, no production
+storage, and no deployment exist yet — everything below that describes
+the API surface, the uploader CLI, or a real credential remains
+unimplemented.**
 
 - The ingestion API is a separate service and separate security boundary
   from the public website — it must never be folded into `web/`'s Worker,

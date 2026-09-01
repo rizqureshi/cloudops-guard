@@ -1,12 +1,21 @@
 """Documentation/contract tests for v0.4.0 Phase 4A (ingestion API design).
 
-Phase 4A is documentation and contract design only -- there is no API,
+Phase 4A is documentation and contract design only -- there was no API,
 storage, authentication, or uploader code yet for these tests to exercise
 directly. These tests instead read the real, on-disk documentation files
 (the new milestone document, `CLAUDE.md`, and the relevant website pages)
 and assert specific, deliberately concrete properties of their text, so a
 later, careless edit to any of these files cannot silently regress one of
 the guarantees Phase 4A's design is built on.
+
+A later, uncommitted, pending-review Phase 4B has since added real local,
+in-memory reference storage/token code under
+`src/cloudops_guard/ingestion/` -- see `TestPhase4BDocumentationMatchesRealCode`
+below, which checks the opposite drift direction: that the "no storage
+code exists yet" claim does not silently survive in documentation once it
+stops being true, while every other class in this file continues to prove
+Phase 4A's own design guarantees (privacy, versioning, security) are
+unweakened by anything Phase 4B added.
 
 Every assertion below reads the actual files this project ships, never a
 hand-copied duplicate of their content -- these are string/regex checks
@@ -1070,3 +1079,112 @@ class TestRoadmapAndMilestoneDoNotDrift:
             assert forbidden_phrase not in normalized, (
                 f"{path}: durable-wording violation: {forbidden_phrase!r}"
             )
+
+
+# --- (g) Phase 4B: local reference storage code exists, but nothing beyond it -
+
+
+INGESTION_PACKAGE_DIR = REPO_ROOT / "src" / "cloudops_guard" / "ingestion"
+
+
+class TestPhase4BDocumentationMatchesRealCode:
+    """Phase 4B added real, on-disk local reference storage/token code.
+    These tests guard the opposite drift direction from the rest of this
+    file: not "don't claim more than exists" but "the stale 'no storage
+    code exists yet' claim must not silently return" once it stops being
+    true. Every assertion here checks the actual files this project ships,
+    exactly like the rest of this suite.
+    """
+
+    _INGESTION_PACKAGE_FILES = [
+        "__init__.py",
+        "models.py",
+        "interfaces.py",
+        "reference.py",
+        "storage_keys.py",
+        "errors.py",
+    ]
+
+    @pytest.mark.parametrize("filename", _INGESTION_PACKAGE_FILES)
+    def test_documented_phase_4b_source_file_exists(self, filename: str) -> None:
+        path = INGESTION_PACKAGE_DIR / filename
+        assert path.is_file(), (
+            f"CLAUDE.md/the milestone doc describe a Phase 4B "
+            f"src/cloudops_guard/ingestion/{filename} that does not exist on disk"
+        )
+
+    def test_claude_md_mentions_the_real_ingestion_package_path(self, claude_md_text: str) -> None:
+        assert "src/cloudops_guard/ingestion/" in claude_md_text
+
+    def test_claude_md_states_phase_4b_is_uncommitted(self, claude_md_text: str) -> None:
+        milestone_bullet = _extract_section(
+            claude_md_text, r"The current approved milestone is v0\.4\.0", r"- Do not introduce"
+        )
+        assert "Phase 4B has implemented" in milestone_bullet
+        assert "uncommitted" in milestone_bullet.lower()
+
+    def test_milestone_doc_states_phase_4b_is_implemented_but_uncommitted(
+        self, milestone_text: str
+    ) -> None:
+        assert "Phase 4B (uncommitted, pending independent review) has since implemented" in (
+            milestone_text
+        )
+
+    def test_only_phase_4b_is_marked_implemented_in_the_phase_plan(
+        self, milestone_text: str
+    ) -> None:
+        # Guards against a careless future edit marking a later phase (4C+)
+        # implemented before it actually is: exactly one "Status:
+        # implemented" marker may exist in the phase-plan section, and it
+        # must belong to Phase 4B specifically.
+        phase_plan_section = _extract_section(
+            milestone_text, r"## I\. Phase plan \(Phase 4B through 4G, proposed\)", r"$"
+        )
+        markers = [m.start() for m in re.finditer(r"Status: implemented", phase_plan_section)]
+        assert len(markers) == 1, (
+            f"expected exactly one phase marked implemented in the phase plan, found {len(markers)}"
+        )
+        phase_4b_heading = phase_plan_section.find("Phase 4B — Storage and token interfaces")
+        assert phase_4b_heading != -1
+        assert phase_4b_heading < markers[0] < phase_plan_section.find("Phase 4C —")
+
+    def test_readme_and_roadmap_mention_phase_4b(self, roadmap_text: str) -> None:
+        readme_text = _read(README_MD)
+        assert "Phase 4B" in readme_text
+        assert "Phase 4B" in roadmap_text
+
+    def test_no_document_claims_an_http_api_authentication_or_uploader_exists(self) -> None:
+        # A positive, closed check: every source-of-truth file's Phase-4B
+        # mention must sit within one sentence of an explicit "no HTTP
+        # endpoint" / "no authentication" / "no uploader" style disclaimer,
+        # not merely omit a claim of completeness.
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4B" not in text:
+                continue
+            lowered = text.lower()
+            assert "no http" in lowered or "no api" in lowered, (
+                f"{path}: mentions Phase 4B without disclaiming an HTTP/API endpoint"
+            )
+            assert "no authentication" in lowered or "no auth" in lowered, (
+                f"{path}: mentions Phase 4B without disclaiming authentication"
+            )
+
+    def test_no_document_claims_production_storage_or_deployment_from_phase_4b(self) -> None:
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4B" not in text:
+                continue
+            lowered = text.lower()
+            assert "no production storage" in lowered or "no deployment" in lowered, (
+                f"{path}: mentions Phase 4B without disclaiming production storage/deployment"
+            )
+
+    def test_phase_4a_documentation_only_status_is_unweakened_by_phase_4b_wording(
+        self, milestone_text: str, claude_md_text: str
+    ) -> None:
+        # Phase 4A's own historical status must remain intact and
+        # undiluted: it is a true, permanent fact about that phase,
+        # regardless of what a later phase has since implemented.
+        assert "is documentation and contract design only" in milestone_text
+        assert "Phase 4A was documentation and contract design only" in claude_md_text
