@@ -22,7 +22,7 @@ from typing import Final
 
 from .abuse_protection import lookup_scope_key, source_scope_key, token_scope_key
 from .errors import AuthenticationFailed, AuthorizationFailed, RateLimited
-from .interfaces import AttemptLimiter, TokenStore
+from .interfaces import AttemptLimiter, RequestRateLimiter, TokenStore
 from .models import TokenScope
 from .token_format import TokenFormatError, parse_token
 
@@ -90,25 +90,29 @@ class AuthenticationCoordinator:
         token_store: TokenStore,
         lookup_limiter: AttemptLimiter,
         source_limiter: AttemptLimiter,
-        token_limiter: AttemptLimiter,
+        token_rate_limiter: RequestRateLimiter,
     ) -> None:
-        """`lookup_limiter` (Layer 1), `source_limiter` (Layer 2), and
-        `token_limiter` (Layer 3) are three separate `AttemptLimiter`
-        instances -- all satisfying the same one generic interface
-        (`interfaces.AttemptLimiter`), exactly as §H's own rationale for
-        that interface's genericity describes, but instantiated
-        separately so each layer's own threshold can be configured
+        """`lookup_limiter` (Layer 1) and `source_limiter` (Layer 2) are
+        `AttemptLimiter` instances -- failure counters for authentication-
+        abuse protection, unchanged from Phase 4C. `token_rate_limiter`
+        (Layer 3) is a `RequestRateLimiter` (Phase 4D correction): Layer 3
+        was never about authentication-guessing at all (§F describes it as
+        "unrelated to authentication-guessing... bounding a legitimately-
+        authenticated token's own ordinary request volume"), so counting
+        it with a *failure* counter was a category error from the start --
+        Phase 4C's own version of this class could check `AttemptLimiter.
+        is_blocked` for Layer 3, but nothing could truthfully ever call
+        `record_failure` for an ordinary successful request, so that
+        check could never actually trigger. See `interfaces.
+        RequestRateLimiter` for the full rationale. Each parameter is a
+        separate instance so each layer's own threshold can be configured
         independently (§F selects no production threshold for any of
-        them; a shared single instance would force all three to share
-        one). Distinct scope-key prefixes (`abuse_protection.py`) already
-        make cross-layer key collisions impossible even if a caller chose
-        to pass the same instance for more than one parameter, but
-        passing three distinct instances is the intended usage.
+        them).
         """
         self._token_store = token_store
         self._lookup_limiter = lookup_limiter
         self._source_limiter = source_limiter
-        self._token_limiter = token_limiter
+        self._token_rate_limiter = token_rate_limiter
 
     def authenticate(self, presented_token: str, source_identifier: str) -> AuthenticatedPrincipal:
         """The complete authentication flow, in the exact order
@@ -182,18 +186,15 @@ class AuthenticationCoordinator:
             scopes=record.scopes,
         )
 
-        # Step 11/12: Layer 3 (per-authenticated-token), checked only
-        # after successful verification -- a pure is_blocked read. This
-        # coordinator never calls token_limiter.record_failure: Phase 4B's
-        # AttemptLimiter.record_failure means exactly "failure," and an
-        # ordinary successful, authenticated request is not one --
-        # populating Layer 3's own request-volume accounting from
-        # successful requests is left to a future HTTP/limiter
-        # implementation (Phase 4D+) that can represent that truthfully,
-        # rather than this phase silently repurposing record_failure to
-        # mean something it does not say.
+        # Step 11/12: Layer 3 (per-authenticated-token), checked -- and
+        # this request counted against it -- only now, strictly after
+        # successful verification: the budget is never checked or
+        # consumed for a request that has not yet authenticated. One
+        # atomic check_and_record_request call, never a separate
+        # is_blocked-then-record pair (which could race), and never
+        # called more than once per request (no double-counting).
         token_key = token_scope_key(record.lookup_id)
-        if self._token_limiter.is_blocked(token_key):
+        if not self._token_rate_limiter.check_and_record_request(token_key):
             raise RateLimited("This token has exceeded its authenticated request-rate limit.")
 
         # Step 13.

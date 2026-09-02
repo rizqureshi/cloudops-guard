@@ -1123,37 +1123,46 @@ class TestPhase4BDocumentationMatchesRealCode:
         assert "Phase 4B has implemented" in milestone_bullet
         assert "uncommitted" in milestone_bullet.lower()
 
-    def test_milestone_doc_states_phase_4b_is_committed_and_phase_4c_is_uncommitted(
+    def test_milestone_doc_states_phase_4b_and_4c_are_committed_and_phase_4d_is_uncommitted(
         self, milestone_text: str
     ) -> None:
+        # Phase 4C was originally uncommitted when this test was first
+        # written; it has since been committed and pushed (commit
+        # `90e2a8848b2df6fd3befeb83c737b06166866bc1`) -- this assertion is
+        # updated to match that true, positive progression, mirroring how
+        # Phase 4B's own "uncommitted" -> "committed and pushed" wording
+        # was already expected to change once it, too, was committed.
         assert "Phase 4B (committed and pushed, commit" in milestone_text
-        assert "Phase 4C (uncommitted, pending independent review) has since implemented" in (
-            milestone_text
-        )
+        assert "Phase 4C (committed and pushed, commit" in milestone_text
+        assert "Phase 4D (uncommitted, pending independent review) has since" in milestone_text
 
-    def test_only_phase_4b_and_4c_are_marked_implemented_in_the_phase_plan(
+    def test_only_phase_4b_4c_and_4d_are_marked_implemented_in_the_phase_plan(
         self, milestone_text: str
     ) -> None:
-        # Guards against a careless future edit marking a later phase (4D+)
-        # implemented before it actually is: exactly two "Status:
+        # Guards against a careless future edit marking a later phase (4E+)
+        # implemented before it actually is: exactly three "Status:
         # implemented" markers may exist in the phase-plan section, and
-        # they must belong to Phase 4B and Phase 4C specifically, in order.
+        # they must belong to Phase 4B, Phase 4C, and Phase 4D
+        # specifically, in order.
         phase_plan_section = _extract_section(
             milestone_text, r"## I\. Phase plan \(Phase 4B through 4G, proposed\)", r"$"
         )
         markers = [m.start() for m in re.finditer(r"Status: implemented", phase_plan_section)]
-        assert len(markers) == 2, (
-            f"expected exactly two phases marked implemented in the phase plan, "
+        assert len(markers) == 3, (
+            f"expected exactly three phases marked implemented in the phase plan, "
             f"found {len(markers)}"
         )
         phase_4b_heading = phase_plan_section.find("Phase 4B — Storage and token interfaces")
         phase_4c_heading = phase_plan_section.find("Phase 4C — Authentication implementation")
         phase_4d_heading = phase_plan_section.find("Phase 4D —")
+        phase_4e_heading = phase_plan_section.find("Phase 4E —")
         assert phase_4b_heading != -1
         assert phase_4c_heading != -1
         assert phase_4d_heading != -1
+        assert phase_4e_heading != -1
         assert phase_4b_heading < markers[0] < phase_4c_heading
         assert phase_4c_heading < markers[1] < phase_4d_heading
+        assert phase_4d_heading < markers[2] < phase_4e_heading
 
     def test_readme_and_roadmap_mention_phase_4b(self, roadmap_text: str) -> None:
         readme_text = _read(README_MD)
@@ -1266,11 +1275,26 @@ class TestPhase4CDocumentationMatchesRealCode:
     def test_claude_md_mentions_the_argon2_dependency(self, claude_md_text: str) -> None:
         assert "argon2-cffi" in claude_md_text
 
-    def test_claude_md_states_phase_4c_is_uncommitted(self, claude_md_text: str) -> None:
-        phase_4c_paragraph = _extract_section(
-            claude_md_text, r"Phase 4C — authentication implementation", r"- Do not introduce"
+    def test_claude_md_states_phase_4c_is_committed_and_phase_4d_is_uncommitted(
+        self, claude_md_text: str
+    ) -> None:
+        # Phase 4C was uncommitted when this test was first written; it
+        # has since been committed and pushed, so this now checks Phase
+        # 4C's OWN paragraph states "committed and pushed" specifically
+        # (not merely that the word "uncommitted" appears somewhere in the
+        # combined 4C+4D block below it, which Phase 4D's own,
+        # still-accurate "uncommitted" status would satisfy vacuously).
+        phase_4c_and_4d_section = _normalize_whitespace(
+            _extract_section(
+                claude_md_text, r"Phase 4C — authentication implementation", r"- Do not introduce"
+            )
         )
-        assert "uncommitted" in phase_4c_paragraph.lower()
+        phase_4d_start = phase_4c_and_4d_section.lower().find("phase 4d")
+        assert phase_4d_start != -1, "expected a Phase 4D paragraph after Phase 4C's own"
+        phase_4c_only = phase_4c_and_4d_section[:phase_4d_start]
+        phase_4d_only = phase_4c_and_4d_section[phase_4d_start:]
+        assert "committed and pushed" in phase_4c_only.lower()
+        assert "uncommitted" in phase_4d_only.lower()
 
     def test_no_document_claims_an_http_endpoint_exists_from_phase_4c(self) -> None:
         for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
@@ -1313,3 +1337,110 @@ class TestPhase4CDocumentationMatchesRealCode:
         commit_sha = "363cdf179945d7c93b78a25edb7b7fc416ac8da8"
         assert commit_sha in milestone_text
         assert commit_sha in claude_md_text
+
+    def test_phase_4c_committed_status_is_consistent_across_documents(
+        self, milestone_text: str, claude_md_text: str
+    ) -> None:
+        commit_sha = "90e2a8848b2df6fd3befeb83c737b06166866bc1"
+        assert commit_sha in milestone_text
+        assert commit_sha in claude_md_text
+
+
+# --- (i) Phase 4D: a local/staging-only HTTP API implementation exists ------
+
+INGESTION_API_PACKAGE_DIR = REPO_ROOT / "src" / "cloudops_guard" / "ingestion_api"
+
+INGESTION_API_MODULE_FILES = [
+    "__init__.py",
+    "app.py",
+    "bounded_body.py",
+    "config.py",
+    "coordinator.py",
+    "envelope.py",
+    "errors.py",
+    "fingerprint.py",
+    "ids.py",
+    "lifecycle.py",
+    "limits.py",
+    "logging_utils.py",
+    "report_validation.py",
+    "responses.py",
+    "strict_json.py",
+]
+
+
+class TestPhase4DDocumentationMatchesRealCode:
+    """Mirrors `TestPhase4CDocumentationMatchesRealCode` for Phase 4D: the
+    opposite drift direction again -- the stale "no HTTP endpoint exists
+    yet" claim must not silently survive now that a real, working (if
+    local/staging-only) HTTP implementation exists, while every claim that
+    no *production* deployment/customer-reachable server/real credential
+    exists must remain true and checkable.
+    """
+
+    @pytest.mark.parametrize("filename", INGESTION_API_MODULE_FILES)
+    def test_documented_phase_4d_source_file_exists(self, filename: str) -> None:
+        path = INGESTION_API_PACKAGE_DIR / filename
+        assert path.is_file(), (
+            f"CLAUDE.md/the milestone doc describe a Phase 4D "
+            f"src/cloudops_guard/ingestion_api/{filename} that does not exist on disk"
+        )
+
+    def test_claude_md_mentions_the_real_ingestion_api_package_path(
+        self, claude_md_text: str
+    ) -> None:
+        assert "src/cloudops_guard/ingestion_api/" in claude_md_text
+
+    def test_claude_md_mentions_the_rfc8785_dependency(self, claude_md_text: str) -> None:
+        assert "rfc8785" in claude_md_text
+
+    def test_no_document_claims_production_deployment_from_phase_4d(self) -> None:
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4D" not in text:
+                continue
+            lowered = text.lower()
+            assert "no production" in lowered or "no deployment" in lowered, (
+                f"{path}: mentions Phase 4D without disclaiming production/deployment status"
+            )
+
+    def test_no_document_claims_a_network_or_customer_reachable_endpoint_from_phase_4d(
+        self,
+    ) -> None:
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4D" not in text:
+                continue
+            lowered = text.lower()
+            assert "network-reachable" in lowered or "customer-reachable" in lowered, (
+                f"{path}: mentions Phase 4D without disclaiming a reachable endpoint"
+            )
+
+    def test_no_document_claims_a_real_customer_token_from_phase_4d(
+        self, claude_md_text: str, milestone_text: str
+    ) -> None:
+        for text in (claude_md_text, milestone_text):
+            phase_4d_index = text.find("Phase 4D")
+            assert phase_4d_index != -1
+            nearby = _normalize_whitespace(text[phase_4d_index : phase_4d_index + 8000]).lower()
+            assert "no real customer" in nearby or "real customer token" in nearby
+
+    def test_capabilities_example_in_milestone_doc_includes_request_id(
+        self, milestone_text: str
+    ) -> None:
+        # Task 3.1's resolution: the capabilities success-response example
+        # must carry a request_id field, consistent with the milestone's
+        # own global "fresh request_id on every response" invariant.
+        capabilities_section = _extract_section(
+            milestone_text, r"### E\.1 `GET /api/v1/capabilities`", r"### E\.2"
+        )
+        assert '"request_id"' in capabilities_section
+
+    def test_phase_4d_status_is_uncommitted_pending_review(self, claude_md_text: str) -> None:
+        phase_4d_index = claude_md_text.find("Phase 4D — ingestion API implementation")
+        assert phase_4d_index != -1
+        nearby = _normalize_whitespace(
+            claude_md_text[phase_4d_index : phase_4d_index + 8000]
+        ).lower()
+        assert "uncommitted" in nearby
+        assert "does not authorize phase 4e" in nearby

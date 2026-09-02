@@ -686,10 +686,17 @@ Not implemented yet, planned for future milestones:
 A versioned report-ingestion API and a command-line uploader are specified
 in a design document (v0.4.0) — see
 `docs/milestones/v0.4.0-ingestion-api.md`. Phase 4A is documentation and
-contract design only. Phase 4B (committed) has added local, in-memory
-reference storage/token interfaces (`src/cloudops_guard/ingestion/`).
-Phase 4C (uncommitted, pending review) has since added real Argon2id
-authentication mechanics, the `<lookup_id>.<secret>` token format, and a
-framework-independent authentication coordinator — no HTTP API, no
-network-reachable server, no uploader, no production credential store,
-and no deployment exist, and nothing is deployed.
+contract design only. Phase 4B and Phase 4C are committed and pushed
+(`src/cloudops_guard/ingestion/`): local, in-memory reference storage/
+token interfaces, real Argon2id authentication mechanics, the
+`<lookup_id>.<secret>` token format, and a framework-independent
+authentication coordinator enforcing the three-layer abuse-protection
+ordering. Phase 4D (uncommitted, pending review) has since implemented
+the four `/api/v1` endpoints on top of that foundation
+(`src/cloudops_guard/ingestion_api/`) as a **local/staging-only** HTTP
+service, runnable only by a caller that explicitly starts it under an
+ASGI server on a loopback address — there is no production service, no
+HTTP endpoint that is network-reachable or customer-reachable, no
+uploader CLI, no production credential store, and no deployment of any
+kind. Nothing here is available to a customer, and the website (`web/`)
+still has no report-ingestion endpoint of any kind.

@@ -21,7 +21,11 @@ import pytest
 from cloudops_guard.ingestion.authenticator import AuthenticationCoordinator
 from cloudops_guard.ingestion.errors import AuthenticationFailed
 from cloudops_guard.ingestion.models import TokenRecord, TokenScope
-from cloudops_guard.ingestion.reference import InMemoryAttemptLimiter, InMemoryTokenStore
+from cloudops_guard.ingestion.reference import (
+    InMemoryAttemptLimiter,
+    InMemoryRequestRateLimiter,
+    InMemoryTokenStore,
+)
 from cloudops_guard.ingestion.token_format import TOKEN_DELIMITER
 from cloudops_guard.ingestion.token_issuance import generate_lookup_id, generate_secret
 
@@ -57,7 +61,7 @@ def _coordinator(store: InMemoryTokenStore) -> AuthenticationCoordinator:
         token_store=store,
         lookup_limiter=InMemoryAttemptLimiter(threshold=10_000),
         source_limiter=InMemoryAttemptLimiter(threshold=10_000),
-        token_limiter=InMemoryAttemptLimiter(threshold=10_000),
+        token_rate_limiter=InMemoryRequestRateLimiter(threshold=10_000),
     )
 
 

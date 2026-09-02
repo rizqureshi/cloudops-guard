@@ -83,14 +83,23 @@ class AuthorizationFailed(IngestionStorageError):
 
 
 class RateLimited(IngestionStorageError):
-    """Raised when an `AttemptLimiter`-backed rate limit is exceeded, in
-    either of two framework-independent contexts: `authenticator.
+    """Raised when a rate limit is exceeded, in any of three
+    framework-independent contexts: `abuse_protection.
     check_capabilities_allowed`'s public, credential-free Layer 2 (source)
-    check, and `AuthenticationCoordinator.authenticate`'s Layer 3
-    (per-authenticated-token) check, checked only after a successful
-    authentication. Distinct from `AuthenticationFailed` in both cases: no
-    credential was rejected, a request is simply being throttled. A future
-    Phase 4D HTTP layer maps this to `429 rate_limited`.
+    check (`AttemptLimiter`-backed, an authentication-abuse counter);
+    `abuse_protection.check_and_record_capabilities_request`'s ordinary
+    request-volume throttle for that same, still-unauthenticated
+    capabilities endpoint (`RequestRateLimiter`-backed, a Phase 4D
+    correction -- a completely separate concern and counter from the
+    Layer 2 check above, since an endpoint can be called abusively often
+    without any individual call ever looking like credential-guessing
+    abuse); and `AuthenticationCoordinator.authenticate`'s Layer 3
+    (per-authenticated-token) check (also `RequestRateLimiter`-backed as
+    of Phase 4D, see `interfaces.RequestRateLimiter` for why), checked
+    only after a successful authentication. Distinct from
+    `AuthenticationFailed` in every case: no credential was rejected, a
+    request is simply being throttled. A future Phase 4D HTTP layer maps
+    this to `429 rate_limited`.
     """
 
 

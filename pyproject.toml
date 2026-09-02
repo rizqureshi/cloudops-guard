@@ -26,6 +26,22 @@ dev = [
     "pytest>=8.0.0",
     "ruff>=0.5.0",
 ]
+# The local/staging ingestion API (Phase 4D) is an optional, separate
+# service boundary -- installing the base `cloudops-guard` CLI never pulls
+# in an HTTP framework or server. See `src/cloudops_guard/ingestion_api/
+# __init__.py` for the justification of each dependency below.
+api = [
+    "starlette>=0.47.0",
+    "uvicorn>=0.34.0",
+    "httpx>=0.28.0",
+    "rfc8785>=0.1.4",
+    # Already an existing transitive dependency of starlette/httpx; made
+    # explicit because Phase 4D's correction pass (item 5) now imports it
+    # directly, to move blocking Argon2id/report-validation/store work
+    # off the event loop and onto a bounded worker thread
+    # (`anyio.to_thread.run_sync`) -- see `app.py`.
+    "anyio>=4.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

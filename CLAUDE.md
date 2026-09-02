@@ -486,10 +486,8 @@ regardless of which milestone is currently in progress.
   framework, route, handler, or server; no database, object store, or
   cloud SDK; `provision_token` never inserts into any `TokenStore`
   (storage insertion for a real deployment remains an explicit later
-  production-store responsibility). This work is **uncommitted**, pending
-  independent review; it does not authorize Phase 4D (the HTTP API),
-  deployment, tagging, or a release. **A subsequent, focused Phase 4C
-  security correction pass** (also uncommitted) fixed three independently
+  production-store responsibility). **A subsequent, focused Phase 4C
+  security correction pass** fixed three independently
   reproduced contract violations found in the initial Phase 4C
   implementation: (1) `ParsedToken`/`ProvisionedToken` were
   `dataclasses.dataclass`es whose `repr`/`str` were redacted but whose
@@ -520,6 +518,299 @@ regardless of which milestone is currently in progress.
   its own output as defense in depth. All three were confirmed via a
   reproduce-before-fix probe and a deliberate source mutation per
   guarantee, each caught by its intended test before being reverted.
+  **Phase 4C (including this correction pass) has since been committed
+  and pushed** (commit `90e2a8848b2df6fd3befeb83c737b06166866bc1`, `feat:
+  add ingestion authentication layer`; both `CI` and `Web CI` passed).
+  **Phase 4D — ingestion API implementation — has since implemented the
+  four `/api/v1` endpoints** (`GET /api/v1/capabilities`,
+  `POST /api/v1/reports`, `GET /api/v1/reports/{ingestion_id}`,
+  `DELETE /api/v1/reports/{ingestion_id}`) under a new
+  `src/cloudops_guard/ingestion_api/` package, built on Phase 4B's storage
+  interfaces and Phase 4C's authentication coordinator exactly as designed
+  — a hand-written raw-ASGI dispatcher (`app.py`, deliberately never using
+  Starlette's `Router`/`Route` classes, whose defaults — trailing-slash
+  redirects, automatic `HEAD`/`OPTIONS`, framework-default error bodies —
+  this contract forbids), strict JSON decoding (`strict_json.py`:
+  duplicate-object-key rejection at every nesting level, `NaN`/`Infinity`
+  rejection, lone-surrogate rejection), bounded incremental body reading
+  mirroring `web/worker/readBoundedBody.ts` (`bounded_body.py`), a
+  closed-envelope validator (`envelope.py`), an RFC 8785 fingerprint
+  function (`fingerprint.py`, the one new dependency `rfc8785` confined to
+  it), report validation reusing the existing `AuditReport`/
+  `GitLabAuditReport` Pydantic models plus a new server-side
+  `MAX_FINDINGS_PER_REPORT` ceiling and summary-recomputation check
+  (`report_validation.py`), a cross-store failure-recovery coordinator
+  (`coordinator.py`), explicitly-invoked retention-sweep/purge functions
+  (`lifecycle.py`), and allowlist-only structured logging
+  (`logging_utils.py`). Applied three pre-authorized contract corrections
+  during implementation: added a fresh `request_id` field to the
+  capabilities success response (the milestone document's own example was
+  corrected to match); added `ReportBlobStore.put_if_absent` (§H) as the
+  safe "reserve a brand-new key" primitive `POST /api/v1/reports`
+  exclusively uses, since plain `put` cannot safely back that path without
+  risking a silent overwrite under a generated-ID collision or a
+  concurrent duplicate request — `put` itself is preserved, unused by
+  Phase 4D, since Phase 4B's own already-approved reference implementation
+  and test suite already treat it as part of the interface's contract; and
+  added a `RequestRateLimiter` interface, deliberately separate from
+  `AttemptLimiter`, for ordinary (non-failure) request-volume throttling —
+  the unauthenticated capabilities endpoint's own request budget, and
+  Layer 3's per-authenticated-token budget — since `AttemptLimiter.
+  record_failure` means "a failure happened" and must never be called to
+  count an ordinary successful request (Phase 4C's own Layer 3 check could
+  never actually trigger for exactly this reason). The cross-store
+  failure-recovery design never overwrites another request's blob, deletes
+  only a request's own unused reservation on a definite pre-commit
+  rejection (an idempotency-key conflict or a metadata-level ID conflict,
+  both raised before any store mutation) or on losing the atomic dedup
+  race, and deliberately leaves a reserved blob alone on any other,
+  ambiguous `MetadataStore` exception rather than risk orphaning a record
+  that might have already committed. A real-loopback-server concurrency
+  suite (`uvicorn` on `127.0.0.1`, an ephemeral port, genuine concurrent
+  HTTP requests via `httpx.AsyncClient`) proved, under real network I/O
+  rather than only in-process calls, that concurrent identical `POST`s
+  (with and without a shared `idempotency_key`) produce exactly one `201`
+  and no duplicate records/blobs, that a concurrent generated-ID collision
+  is fully absorbed by retry, and that the capabilities and per-token
+  request-rate ceilings are never exceeded under real concurrent load —
+  each scenario run 20 times with zero flakes observed. That same
+  real-server testing surfaced and fixed one genuine defect before this
+  work was reported complete: the abuse-protection source identifier
+  originally included the client's own ephemeral TCP port
+  (`f"{host}:{port}"`), which a real client's connection pool varies per
+  connection — trivially defeating Layer 2/2.5 source-scoped throttling
+  for anyone willing to open more than one connection; fixed to use the
+  peer host alone. Mutation-verification (deliberate source mutation,
+  confirmed test failure, then restore) was performed for all eight of
+  the task's named highest-risk guarantees: bounded streaming, duplicate-
+  key rejection, RFC 8785 fingerprint composition, tenant-isolation/
+  identical-404, concurrent dedup, blob-collision/no-overwrite, atomic
+  request-rate accounting, and purge ordering. **None of this is a
+  production service**: `create_app` performs no I/O (confirmed by a
+  socket/thread-spy import probe); no HTTP endpoint here is
+  network-reachable or customer-reachable outside a caller's own
+  explicitly-started local/loopback test server; no real customer token,
+  production database, object store, secret manager, or deployment
+  infrastructure exists. This work is **uncommitted**, pending independent
+  review; it does not authorize Phase 4E (the CLI uploader), production
+  storage, credentials, deployment, tagging, or a release. **A subsequent,
+  narrow Phase 4D correction pass** (also uncommitted) fixed six
+  independently-reproduced issues found in the initial Phase 4D
+  implementation: (1) `lifecycle.purge_retired_ingestion` deleted a
+  `received` record's live blob before `mark_purged` ever validated its
+  status, so calling it too early destroyed data and only then raised
+  `ValueError` — fixed by adding `MetadataStore.get_any_status` (a new,
+  tenant-scoped, status-agnostic lookup distinct from the existing,
+  deliberately RECEIVED-only `get`) and checking eligibility before any
+  blob deletion, relying on the lifecycle's own monotonic
+  received→retired→deleted ordering for safety under concurrent
+  retirement/purge; (2) `report_schema_version: 1.0` (a JSON number with
+  an integer value, which the approved contract accepts) was wrongly
+  rejected, while an unsafe integer or a `1e400`-style exponential
+  overflow to `inf` buried anywhere in a report — including an
+  ignored/unvalidated extra field — reached RFC 8785 canonicalization
+  uncaught and became a `500`; fixed with a new recursive numeric-domain
+  validator in `strict_json.py` (rejecting non-finite floats and
+  integers outside `+-(2**53-1)` anywhere in the decoded document,
+  before envelope parsing) plus a defensive `rfc8785.CanonicalizationError`
+  catch in `fingerprint.py`, and `envelope.py` now accepts an
+  integer-valued float for `report_schema_version` without coercing it;
+  (3) every header lookup used `Headers.get()`, which silently resolves
+  a repeated header to only its first occurrence — fixed by reading the
+  raw ASGI header list directly and requiring exactly one
+  `Authorization`/`Content-Type` header, rejecting any `Content-Length`
+  duplicate (even an agreeing one) before authentication is even
+  attempted, and rejecting any `Content-Encoding` occurrence; (4) route
+  dispatch collapsed empty path segments, so `/api/v1/capabilities/`,
+  `/api//v1/capabilities`, and similar double/trailing-slash variants
+  silently aliased the real routes — fixed by matching only the four
+  exact declared path shapes, with no segment-collapsing, so every alias
+  is now a `404`, never a redirect; (5) every handler called blocking
+  Argon2id authentication, report validation, RFC 8785 fingerprinting,
+  and synchronous store operations directly on the event loop, so one
+  request's slow work fully serialized every other concurrent request
+  behind it — fixed by moving each handler's blocking portion onto
+  AnyIO's bounded worker-thread pool (`anyio.to_thread.run_sync`, a new
+  explicit dependency though already present transitively via
+  `starlette`), proven by a real-loopback test whose instrumented
+  `MetadataStore` wrapper uses a `threading.Barrier` to force two
+  concurrent requests to be simultaneously inside
+  `create_or_get_received`, and by a responsiveness test showing a
+  concurrent capabilities call completes without waiting on a
+  deliberately slow secret verifier; (6) added
+  `tests/fixtures/ingestion_fingerprint_fixtures_v1.json`, a shared,
+  versioned RFC 8785 fingerprint fixture set (representative
+  multi-finding Kubernetes/GitLab reports, a key-order equivalence pair,
+  Unicode/RTL/combining-character coverage, and an int/float numeric
+  canonicalization equivalence pair — every case independently confirmed
+  genuinely accepted, and every `expected_fingerprint` computed once,
+  offline, never at test-collection time by the implementation under
+  test), consumable unchanged by Phase 4E; also re-reviewed
+  `coordinator.py`'s cross-store recovery and confirmed (with a new,
+  precise `ValueError`-shaped test) that only the two documented
+  `MetadataStore` exception types are treated as a safe, definite
+  pre-commit cleanup signal, while every other exception — including an
+  internal precondition `ValueError` this coordinator's own bug would
+  have to trigger — correctly stays in the conservative
+  "leave the blob alone" bucket. Every issue was independently reproduced
+  before being fixed; every fix has a regression test, and several
+  (the blob-purge ordering, the numeric-domain rejection, the
+  singleton-header enforcement, the exact-route matching, and the
+  thread-offload concurrency guarantee) have a deliberate
+  mutation-verification pass confirming the added test actually detects
+  the reintroduced defect. No production deployment, credential, or
+  infrastructure was touched by this correction pass. **A second, final,
+  narrow Phase 4D correction pass** (also uncommitted) fixed four further
+  independently-reproduced issues: (1) the first pass's own
+  `get_any_status`-based purge-eligibility check was still a check-*then*-
+  act operation — an old `deleted` record's tombstone could expire and its
+  `(tenant_id, ingestion_id)` key be reused by a genuinely new `received`
+  identity before `purge_retired_ingestion`'s own unconditional
+  `ReportBlobStore.delete` call ran, silently destroying that new
+  identity's live blob, and two concurrent purgers could race the same
+  way — fixed by replacing that check entirely with a monotonic,
+  purely-internal per-key generation counter and an **exclusive**
+  purge-claim mechanism (`PurgeClaim`, `MetadataStore.begin_purge`/
+  `release_purge_claim`/`finalize_purge`, never customer-visible): at
+  most one caller is ever granted a claim for a given generation, so a
+  second, independently-delayed caller's own `ReportBlobStore.delete`
+  call structurally never happens at all — verified, independently of the
+  eventual test suite, via direct reproduction scripts for both the exact
+  reused-identity sequence and the two-concurrent-purgers race, plus 6
+  new deterministic barrier/spy-based tests; (2) the first pass's own
+  thread-offload refactor (item 5 above) had moved `read_bounded_body`
+  *before* authentication for `POST /api/v1/reports`, so a missing,
+  malformed, duplicated, or invalid credential — or a rate-limited or
+  insufficient-scope one — caused `receive()` to be called before the
+  request was ever rejected, contradicting `app.py`'s own comment
+  claiming the opposite — fixed by splitting `_ingest_report_blocking`
+  into a separate `_authenticate_and_authorize_for_write` offload that
+  now runs, and is awaited to completion, strictly before
+  `read_bounded_body`, with the resulting `AuthenticatedPrincipal` passed
+  into the second offload rather than re-authenticated; a new
+  `bounded_body.validate_declared_content_length` factors out the cheap,
+  read-free declared-`Content-Length` check so it too runs before
+  authentication; proven by 7 new ASGI receive-spy tests (one control,
+  six failure modes: missing/malformed/duplicated/invalid/rate-limited/
+  insufficient-scope, each with a spy `receive` that raises
+  `AssertionError` if ever called) plus a mutation-verification pass
+  reverting the ordering and confirming all six fail; (3)
+  `coordinator.create_ingestion` called `config.clock()` and constructed
+  the `IngestionRecord` candidate *after* a successful `put_if_absent`
+  reservation but *outside* any `try` guarding it, so either raising left
+  an orphaned, never-cleaned-up blob reservation — since this is always
+  strictly before `create_or_get_received` is ever called, it is never
+  ambiguous the way that call's own exceptions are — fixed by wrapping
+  both operations in their own `try`/`except Exception` that deletes the
+  owned reservation and re-raises, deliberately kept separate from (and
+  proven, by a new regression test, not to widen) the existing
+  `IngestionIdConflict`/`IdempotencyKeyConflict`-only handling for
+  `create_or_get_received` itself — correcting this same document's
+  earlier, first-correction-pass claim that this guarantee was already
+  fully satisfied, which was incorrect; (4) a syntactically valid
+  document with roughly 1,000 nested arrays or objects let a bare
+  `RecursionError` escape `strict_json.strict_decode_json` entirely (an
+  unsanitized `500`, and independently the same recursive helpers this
+  contract's own strict-decode validation used could themselves exhaust
+  the stack) — fixed by replacing the two separate recursive helpers
+  (`_reject_lone_surrogates`/`_reject_unsafe_numbers`) with one
+  **iterative** (explicit-stack, never Python call recursion) combined
+  walk enforcing a new, conservative, documented `_MAX_NESTING_DEPTH`
+  ceiling (64) before either of its other two per-node checks, `json.loads`
+  itself now also mapping any `RecursionError` it might independently
+  raise to the same sanitized `400 invalid_request`, and
+  `fingerprint.compute_report_fingerprint` — callable directly, bypassing
+  `strict_decode_json` entirely (e.g. a future uploader computing this
+  same fingerprint locally) — independently catching `RecursionError`
+  from `rfc8785.dumps` as a defensive backstop alongside its existing
+  `CanonicalizationError` catch. Every one of the four issues was
+  independently reproduced before any code changed; every fix has
+  dedicated regression tests (27 new, across
+  `test_ingestion_api_lifecycle.py`, `test_ingestion_api_reports_post.py`,
+  `test_ingestion_api_coordinator.py`, `test_ingestion_api_strict_json.py`,
+  and `test_ingestion_api_fingerprint_conformance.py`) and an explicit
+  mutation-verification pass (temporarily reverting the fix, confirming
+  the new test(s) fail, then restoring and reconfirming they pass) for
+  all four. The full pytest suite grew from 1996 to 2023 (all passing);
+  the real-loopback concurrency suites
+  (`test_ingestion_api_concurrency.py`,
+  `test_ingestion_api_thread_offload_concurrency.py`,
+  `test_ingestion_authenticator_concurrency.py`) were run repeatedly,
+  passing 176/176 every time. No new dependency was added; no production
+  deployment, credential, or infrastructure was touched. This second
+  correction pass is also **uncommitted**, pending independent review; it
+  does not authorize Phase 4E, production storage, credentials,
+  deployment, tagging, or a release. **A third, final Phase 4D purge-claim
+  hardening pass** (also uncommitted) fixed three further
+  independently-reproduced defects in the second pass's own claim
+  protocol, and corrects that second pass's own description of its
+  generation-scoped purge-claim mechanism as having "closed" the race —
+  it closed only the two races that pass itself reproduced, not the
+  three below: (1) `PurgeClaim` carried only `(tenant_id, ingestion_id,
+  generation)`, and `_active_purge_claims` stored only the generation —
+  reproduced: claim A acquired and released; claim B acquired for the
+  same, unchanged generation; releasing A *again* incorrectly deleted
+  B's active entry (an ABA problem — a generation-only comparison cannot
+  distinguish two separate acquisitions against an unchanged generation),
+  and `finalize_purge(A)` succeeded even after A had been released —
+  fixed by adding a globally-unique `claim_id` to `PurgeClaim` and to the
+  internal active-claim record (`_ActivePurgeClaim`), so `release_purge_claim`/
+  `finalize_purge` now compare **both** `generation` and `claim_id`
+  against whatever is currently active, never generation alone; (2)
+  `mark_purged` — preserved, unused by `lifecycle.purge_retired_ingestion`,
+  but still part of the same `MetadataStore` — never consulted
+  `_active_purge_claims` at all, so it could bypass the claim protocol
+  entirely: reproduced by retiring a record, acquiring a claim via
+  `begin_purge`, then calling `mark_purged` directly, which succeeded
+  and created a tombstone while the claim was still active and its
+  holder had not yet physically deleted anything — once that tombstone
+  would later expire and the ID be reused, the claim holder's own
+  still-pending blob deletion would target the new identity's live
+  blob — fixed by having `mark_purged` raise, under the same lock, when
+  an exact active claim exists for the record; (3) `purge_retired_ingestion`
+  acquired its claim before calling `config.clock()`, and never wrapped
+  its own `finalize_purge` call, so a clock failure, a naive timestamp,
+  a `deleted_at` preceding `retired_at`, or a finalize failure could each
+  leak a claim permanently — fixed by adopting the stronger protocol the
+  task itself invited: `begin_purge` now takes the proposed deletion
+  timestamp `at` directly and atomically validates it *and* constructs
+  the complete eventual `deleted` candidate record and tombstone before
+  ever granting a claim (so a validation failure can never leave one
+  dangling — there is nothing yet to release), `finalize_purge` no
+  longer takes `at` at all (it only commits the already-validated
+  candidate `begin_purge` captured), and every remaining step from claim
+  acquisition onward in `purge_retired_ingestion` is wrapped so that any
+  exception releases exactly that call's own claim before re-raising.
+  Every issue was independently reproduced before being fixed (direct
+  store-level reproduction scripts and test assertions for all three,
+  matching each item's own before-fix description above); 18 new
+  regression tests were added across a new `tests/
+  test_ingestion_metadata_store_purge_claims.py` (13 tests, direct
+  `InMemoryMetadataStore`-level coverage of the unique-acquisition and
+  `mark_purged`-coordination guarantees, including the exact named
+  A-release/B-acquire/A-release-again and A-release/A-finalize
+  scenarios) and `tests/test_ingestion_api_lifecycle.py` (5 new tests, a
+  `TestPurgeClaimExceptionSafety` class covering `config.clock()`
+  raising, a naive timestamp, `deleted_at` preceding `retired_at`, a
+  finalize failure releasing its claim for retry, and a single
+  end-to-end test driving all five of this pass's own failure modes
+  against the same record in sequence before proving a completely
+  ordinary purge and a subsequent tombstone-expiry-and-reuse cycle are
+  both unaffected). Mutation-verified all four of the task's own named
+  scenarios: reverting `finalize_purge`'s comparison to the pre-fix,
+  generation-only form (also faithfully reproducing "a released claim
+  can still finalize," since the old form never checked
+  `_active_purge_claims` at all) failed 7 tests across both new files;
+  disabling `mark_purged`'s active-claim guard failed 2 tests; omitting
+  the exception-path claim release around `purge_retired_ingestion`'s
+  own `finalize_purge` call failed 2 tests — all four mutations were
+  reverted and the full suite reconfirmed green afterward. The full
+  pytest suite grew from 2023 to 2041 (all passing); the real-loopback
+  concurrency suites were re-run and remained green. No new dependency
+  was added; no production deployment, credential, or infrastructure was
+  touched. This third correction pass is also **uncommitted**, pending
+  independent review; it does not authorize Phase 4E, production
+  storage, credentials, deployment, tagging, or a release.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate

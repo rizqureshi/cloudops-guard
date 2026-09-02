@@ -22,9 +22,13 @@ but:
   GitLab collector's own token
   (`CLOUDOPS_GUARD_GITLAB_TOKEN`) — out of band, by a human, never
   through a self-service flow this codebase implements.
-- **No HTTP endpoint exists to receive a provisioned token.** Phase 4D
-  (a separate, not-yet-authorized phase) is required before any of this
-  is reachable over a network.
+- **No network-reachable or customer-reachable endpoint exists to receive
+  a provisioned token.** Phase 4D has since implemented the `/api/v1`
+  endpoints (`src/cloudops_guard/ingestion_api/`), but strictly as a
+  local/staging-only service a caller can run themselves against a
+  loopback address for testing — there is still no production deployment
+  of any kind, so a provisioned token from this procedure has nothing
+  network-reachable to authenticate against today.
 
 ## The procedure
 
@@ -91,9 +95,11 @@ but:
      `docs/milestones/v0.4.0-ingestion-api.md` §E already documents as
      accepting `platform`/`report_schema_version`/`report`/
      `idempotency_key` only, never a token field);
-   - placed in a URL (the milestone document's §F already requires the
-     token be transmitted only via an `Authorization: Bearer <token>`
-     header, once a transport exists);
+   - placed in a URL (the milestone document's §F requires the token be
+     transmitted only via an `Authorization: Bearer <token>` header, and
+     Phase 4D's implementation parses a bearer credential only from that
+     exact header — never a query parameter, the body, a path segment, or
+     a cookie);
    - copied into documentation as a usable credential (every example
      value in this document is illustrative, generated for this document
      only, and grants access to nothing).

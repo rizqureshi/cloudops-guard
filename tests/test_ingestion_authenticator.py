@@ -36,7 +36,11 @@ from cloudops_guard.ingestion.authenticator import (
 )
 from cloudops_guard.ingestion.errors import AuthenticationFailed, AuthorizationFailed, RateLimited
 from cloudops_guard.ingestion.models import TokenRecord, TokenScope
-from cloudops_guard.ingestion.reference import InMemoryAttemptLimiter, InMemoryTokenStore
+from cloudops_guard.ingestion.reference import (
+    InMemoryAttemptLimiter,
+    InMemoryRequestRateLimiter,
+    InMemoryTokenStore,
+)
 from cloudops_guard.ingestion.token_format import TOKEN_DELIMITER
 from cloudops_guard.ingestion.token_issuance import (
     generate_lookup_id,
@@ -127,7 +131,7 @@ def _coordinator(
         token_store=token_store,
         lookup_limiter=InMemoryAttemptLimiter(threshold=lookup_threshold),
         source_limiter=InMemoryAttemptLimiter(threshold=source_threshold),
-        token_limiter=InMemoryAttemptLimiter(threshold=token_threshold),
+        token_rate_limiter=InMemoryRequestRateLimiter(threshold=token_threshold),
     )
 
 
@@ -291,7 +295,7 @@ class TestArgon2idNeverInvokedOnShortCircuitPaths:
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=source_limiter,
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -310,7 +314,7 @@ class TestArgon2idNeverInvokedOnShortCircuitPaths:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -405,7 +409,7 @@ class TestLayer1LookupScopedLimiter:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -424,7 +428,7 @@ class TestLayer1LookupScopedLimiter:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -445,7 +449,7 @@ class TestLayer1LookupScopedLimiter:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -470,7 +474,7 @@ class TestLayer2SourceScopedLimiter:
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=source_limiter,
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -486,7 +490,7 @@ class TestLayer2SourceScopedLimiter:
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=source_limiter,
-            token_limiter=InMemoryAttemptLimiter(threshold=1000),
+            token_rate_limiter=InMemoryRequestRateLimiter(threshold=1000),
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -531,13 +535,17 @@ class TestLayer3TokenScopedLimiter:
         store = InMemoryTokenStore(secret_verifier=verifier)
         token = _issue_and_register(store, verifier)
         lookup_id = token.partition(TOKEN_DELIMITER)[0]
-        token_limiter = InMemoryAttemptLimiter(threshold=1)
-        token_limiter.record_failure(token_scope_key(lookup_id))
+        # threshold=1: the one allowed request is consumed up front, so
+        # the coordinator's own check_and_record_request call (which
+        # would be this request's *second* attempt against this scope
+        # key) is the one that finds the budget already exhausted.
+        token_rate_limiter = InMemoryRequestRateLimiter(threshold=1)
+        assert token_rate_limiter.check_and_record_request(token_scope_key(lookup_id)) is True
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         # Only reached (and raises RateLimited, not AuthenticationFailed)
@@ -557,13 +565,13 @@ class TestLayer3TokenScopedLimiter:
         token_a = _issue_and_register(store, verifier)
         token_b = _issue_and_register(store, verifier)
         lookup_id_a = token_a.partition(TOKEN_DELIMITER)[0]
-        token_limiter = InMemoryAttemptLimiter(threshold=1)
-        token_limiter.record_failure(token_scope_key(lookup_id_a))
+        token_rate_limiter = InMemoryRequestRateLimiter(threshold=1)
+        assert token_rate_limiter.check_and_record_request(token_scope_key(lookup_id_a)) is True
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         with pytest.raises(RateLimited):
@@ -581,7 +589,7 @@ class TestLayer3TokenScopedLimiter:
 
         verifier = _RecordingVerifier()
         store = InMemoryTokenStore(secret_verifier=verifier)
-        # Rebuild the same scenario with a token_limiter that blocks
+        # Rebuild the same scenario with a token_rate_limiter that blocks
         # *everything*, to prove it is never even consulted on any
         # failed-authentication path.
         if case_name == "_wrong_secret_case":
@@ -597,22 +605,19 @@ class TestLayer3TokenScopedLimiter:
         else:
             token = "malformed"
 
-        class _AlwaysBlockedLimiter:
-            def record_failure(self, scope_key: str) -> None:
-                pass
-
-            def is_blocked(self, scope_key: str) -> bool:
-                return True
+        class _AlwaysBlockedRequestRateLimiter:
+            def check_and_record_request(self, scope_key: str) -> bool:
+                return False
 
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=InMemoryAttemptLimiter(threshold=1000),
             source_limiter=InMemoryAttemptLimiter(threshold=1000),
-            token_limiter=_AlwaysBlockedLimiter(),  # type: ignore[arg-type]
+            token_rate_limiter=_AlwaysBlockedRequestRateLimiter(),  # type: ignore[arg-type]
         )
 
         # Must still raise AuthenticationFailed (not RateLimited) --
-        # proves token_limiter was never consulted on this failure path.
+        # proves token_rate_limiter was never consulted on this failure path.
         with pytest.raises(AuthenticationFailed):
             coordinator.authenticate(token, "source-a")
 
@@ -621,22 +626,24 @@ class TestExactOrderingAndCallCounts:
     """Spy-based proofs of exact call sequence and count -- not merely
     the final result."""
 
-    def _spies(self) -> tuple[list[tuple], _SpyTokenStore, _SpyLimiter, _SpyLimiter, _SpyLimiter]:
+    def _spies(
+        self,
+    ) -> tuple[list[tuple], _SpyTokenStore, _SpyLimiter, _SpyLimiter, _SpyRequestRateLimiter]:
         call_log: list[tuple] = []
         store = _SpyTokenStore(call_log)
         lookup_limiter = _SpyLimiter("lookup_limiter", call_log)
         source_limiter = _SpyLimiter("source_limiter", call_log)
-        token_limiter = _SpyLimiter("token_limiter", call_log)
-        return call_log, store, lookup_limiter, source_limiter, token_limiter
+        token_rate_limiter = _SpyRequestRateLimiter("token_rate_limiter", call_log)
+        return call_log, store, lookup_limiter, source_limiter, token_rate_limiter
 
     def test_layer2_blocked_short_circuits_everything(self) -> None:
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         source_limiter.blocked.add(source_scope_key("blocked-source"))
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         # A deliberately *malformed* token: this is what actually proves
@@ -653,7 +660,7 @@ class TestExactOrderingAndCallCounts:
         assert store.verify_calls == []
         assert lookup_limiter.is_blocked_calls == []
         assert lookup_limiter.record_failure_calls == []
-        assert token_limiter.is_blocked_calls == []
+        assert token_rate_limiter.check_and_record_request_calls == []
         # The Layer 2 check itself ran (exactly once)...
         assert source_limiter.is_blocked_calls == [source_scope_key("blocked-source")]
         # ...but the malformed-token branch's own record_failure call was
@@ -662,12 +669,12 @@ class TestExactOrderingAndCallCounts:
         assert source_limiter.record_failure_calls == []
 
     def test_unknown_lookup_never_reaches_layer1_or_argon2id(self) -> None:
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -679,7 +686,7 @@ class TestExactOrderingAndCallCounts:
         assert source_limiter.record_failure_calls == [source_scope_key("source-a")]
 
     def test_layer1_blocked_never_reaches_argon2id(self) -> None:
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         lookup_id = "a" * 22
         record = TokenRecord(
             lookup_id=lookup_id,
@@ -695,7 +702,7 @@ class TestExactOrderingAndCallCounts:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -704,7 +711,7 @@ class TestExactOrderingAndCallCounts:
         assert store.verify_calls == []
 
     def test_wrong_secret_calls_verify_exactly_once_then_records_failures(self) -> None:
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         lookup_id = "a" * 22
         record = TokenRecord(
             lookup_id=lookup_id,
@@ -720,7 +727,7 @@ class TestExactOrderingAndCallCounts:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         with pytest.raises(AuthenticationFailed):
@@ -738,7 +745,7 @@ class TestExactOrderingAndCallCounts:
         assert verify_index < source_record_index
 
     def test_successful_secret_checks_layer3_only_after_verification(self) -> None:
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         lookup_id = "a" * 22
         record = TokenRecord(
             lookup_id=lookup_id,
@@ -754,24 +761,27 @@ class TestExactOrderingAndCallCounts:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
 
         coordinator.authenticate(f"{lookup_id}{TOKEN_DELIMITER}{'b' * 43}", "source-a")
 
         verify_index = call_log.index(("token_store.verify_secret",))
-        token_check_index = call_log.index(("token_limiter.is_blocked", token_scope_key(lookup_id)))
+        token_check_index = call_log.index(
+            ("token_rate_limiter.check_and_record_request", token_scope_key(lookup_id))
+        )
         assert verify_index < token_check_index
 
-    def test_token_limiter_record_failure_is_never_called_anywhere(self) -> None:
+    def test_token_rate_limiter_only_consulted_after_successful_verification(self) -> None:
         # §8's explicit callout: Phase 4B's AttemptLimiter.record_failure
         # means "failure" -- an ordinary successful, authenticated
-        # request is not one, so this coordinator must never call
-        # token_limiter.record_failure for any reason, on any path
-        # (success or otherwise). Proven across every scenario this file
-        # already exercises: successful auth, wrong secret, unknown
-        # lookup, and a Layer-3-blocked request.
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        # request is not one, so Layer 3 (now a RequestRateLimiter, which
+        # structurally has no record_failure method at all) must never be
+        # consulted on any failed-authentication path, and must be
+        # consulted exactly once per authenticate() call that does reach
+        # it. Proven across every scenario this file already exercises:
+        # successful auth, wrong secret, and a Layer-3-blocked request.
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         lookup_id = "a" * 22
         record = TokenRecord(
             lookup_id=lookup_id,
@@ -786,35 +796,38 @@ class TestExactOrderingAndCallCounts:
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
         valid_token = f"{lookup_id}{TOKEN_DELIMITER}{'b' * 43}"
+        token_key = token_scope_key(lookup_id)
 
         store.verifier_result = True
         coordinator.authenticate(valid_token, "source-a")  # success
-        assert token_limiter.record_failure_calls == []
+        assert token_rate_limiter.check_and_record_request_calls == [token_key]
 
         store.verifier_result = False
         with pytest.raises(AuthenticationFailed):
             coordinator.authenticate(valid_token, "source-a")  # wrong secret
-        assert token_limiter.record_failure_calls == []
+        # Unchanged from the successful call above -- never consulted on
+        # a failed-authentication path.
+        assert token_rate_limiter.check_and_record_request_calls == [token_key]
 
-        token_limiter.blocked.add(token_scope_key(lookup_id))
+        token_rate_limiter.blocked.add(token_key)
         store.verifier_result = True
         with pytest.raises(RateLimited):
             coordinator.authenticate(valid_token, "source-a")  # Layer 3 blocked
-        assert token_limiter.record_failure_calls == []
+        assert token_rate_limiter.check_and_record_request_calls == [token_key, token_key]
 
     def test_scope_failure_occurs_only_after_authentication_succeeds(self) -> None:
         # authorize() takes an AuthenticatedPrincipal, which can only be
         # constructed by a successful authenticate() call -- a failed
         # attempt never produces one to authorize in the first place.
-        call_log, store, lookup_limiter, source_limiter, token_limiter = self._spies()
+        call_log, store, lookup_limiter, source_limiter, token_rate_limiter = self._spies()
         coordinator = AuthenticationCoordinator(
             token_store=store,
             lookup_limiter=lookup_limiter,
             source_limiter=source_limiter,
-            token_limiter=token_limiter,
+            token_rate_limiter=token_rate_limiter,
         )
         with pytest.raises(AuthenticationFailed):
             principal = coordinator.authenticate("malformed", "source-a")
@@ -862,6 +875,19 @@ class _SpyLimiter:
         self.is_blocked_calls.append(scope_key)
         self.call_log.append((f"{self.name}.is_blocked", scope_key))
         return scope_key in self.blocked
+
+
+class _SpyRequestRateLimiter:
+    def __init__(self, name: str, call_log: list[tuple]) -> None:
+        self.name = name
+        self.call_log = call_log
+        self.blocked: set[str] = set()
+        self.check_and_record_request_calls: list[str] = []
+
+    def check_and_record_request(self, scope_key: str) -> bool:
+        self.check_and_record_request_calls.append(scope_key)
+        self.call_log.append((f"{self.name}.check_and_record_request", scope_key))
+        return scope_key not in self.blocked
 
 
 class TestRealArgon2idEndToEnd:

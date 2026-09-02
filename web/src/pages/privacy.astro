@@ -66,14 +66,16 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <h2>A separate, future report-ingestion API</h2>
       <p>
         A versioned report-ingestion API and a command-line uploader are specified in a design document
-        (v0.4.0) &mdash; documentation and contract design only, with no
-        deployment or live endpoint of any kind. Later phases have added local, in-memory reference
-        storage code and, most recently, real Argon2id authentication mechanics inside the CloudOps Guard
-        Python package &mdash; still no HTTP endpoint, no network-reachable server, no real customer
-        credential, and nothing deployed. That design is, and will remain, a service entirely separate
-        from this website: nothing on this site can or will call it, opening a report in the local report
-        explorer above will never trigger it, and this website's own behavior described on this page does
-        not change because of it. See the <a href="/roadmap">roadmap</a> for its current status.
+        (v0.4.0). Later phases have added local, in-memory reference storage code, real Argon2id
+        authentication mechanics, and, most recently, a working implementation of the four designed API
+        endpoints inside the CloudOps Guard Python package &mdash; but strictly as a
+        <strong>local/staging-only</strong> service: it exists only as code a developer can run themselves
+        against a loopback address for testing. There is still no network-reachable or customer-reachable
+        server, no real customer credential, and nothing deployed anywhere. That design is, and will
+        remain, a service entirely separate from this website: nothing on this site can or will call it,
+        opening a report in the local report explorer above will never trigger it, and this website's own
+        behavior described on this page does not change because of it. See the
+        <a href="/roadmap">roadmap</a> for its current status.
       </p>
 
       <p><a href="/roadmap">See the roadmap</a> for what is planned or still absent.</p>

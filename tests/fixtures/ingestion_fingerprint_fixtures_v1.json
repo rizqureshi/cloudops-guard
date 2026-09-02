@@ -1,0 +1,385 @@
+{
+  "fixture_set_version": 1,
+  "purpose": "Shared, versioned RFC 8785 fingerprint conformance fixtures for Phase 4D (server) and Phase 4E (uploader CLI) -- both sides must independently compute the exact expected_fingerprint for each case's (platform, report_schema_version, report) tuple, with no coordination required between them. Consumable unchanged by Phase 4E: a plain JSON file, no test-framework coupling.",
+  "algorithm": "RFC 8785 JCS canonicalization of the JSON object {\"platform\": platform, \"report_schema_version\": report_schema_version, \"report\": report}, then SHA-256 of the canonical UTF-8 bytes, formatted as the lowercase-hex string \"sha256:<hex>\".",
+  "generated_by": "tests/fixtures/generate_ingestion_fingerprint_fixtures.py (run once, offline; expected_fingerprint values are NOT recomputed at test runtime by the implementation under test).",
+  "invariant": "Every case's report is a genuinely schema-valid, fully-accepted report for its platform (validated at generation time via report_validation.validate_report) -- this file intentionally contains no invalid/rejected input; strict-decode and numeric-domain REJECTION fixtures are covered separately (see test_ingestion_api_strict_json.py, test_ingestion_api_reports_post.py::TestNumericDomainRejection).",
+  "key_order_equivalence_pairs": [
+    [
+      "kubernetes_key_order_variant_a",
+      "kubernetes_key_order_variant_b"
+    ]
+  ],
+  "numeric_canonicalization_equivalence_pairs": [
+    [
+      "kubernetes_float_summary_counts",
+      "kubernetes_key_order_variant_a"
+    ]
+  ],
+  "cases": [
+    {
+      "name": "kubernetes_representative_multi_finding",
+      "platform": "kubernetes",
+      "report_schema_version": 1,
+      "notes": "The project's own golden Kubernetes report (4 findings, multiple severities) -- the deepest structure the real Finding/AuditReport contract has (a list of several findings; Finding itself is flat).",
+      "report": {
+        "cluster_context": "prod-demo-cluster",
+        "namespace_filter": "payments",
+        "generated_at": "2026-01-15T09:30:00Z",
+        "findings": [
+          {
+            "check_id": "K8S-RES-001",
+            "title": "Container has no CPU request",
+            "severity": "medium",
+            "cluster_context": "prod-demo-cluster",
+            "namespace": "payments",
+            "resource_kind": "Deployment",
+            "resource_name": "checkout-api",
+            "container_name": "api",
+            "evidence": "Container 'api' (image: example.com/checkout-api:2.3.1) does not set resources.requests.cpu",
+            "impact": "Without a CPU request the scheduler cannot reserve capacity for this container.",
+            "recommendation": "Set resources.requests.cpu based on observed usage.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-15T09:30:00Z"
+          },
+          {
+            "check_id": "K8S-RES-004",
+            "title": "Container has no memory limit",
+            "severity": "high",
+            "cluster_context": "prod-demo-cluster",
+            "namespace": "payments",
+            "resource_kind": "Deployment",
+            "resource_name": "checkout-api",
+            "container_name": "api",
+            "evidence": "Container 'api' (image: example.com/checkout-api:2.3.1) does not set resources.limits.memory",
+            "impact": "Without a memory limit this container can consume unbounded memory.",
+            "recommendation": "Set resources.limits.memory to cap worst-case memory usage.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-15T09:30:00Z"
+          },
+          {
+            "check_id": "K8S-IMG-001",
+            "title": "Container image uses a mutable tag",
+            "severity": "high",
+            "cluster_context": "prod-demo-cluster",
+            "namespace": "payments",
+            "resource_kind": "Pod",
+            "resource_name": "wébapp-batch-7f9c2",
+            "container_name": "worker",
+            "evidence": "Container 'worker' uses image 'example.com/batch:latest' (tag: latest)",
+            "impact": "A mutable tag such as 'latest' undermines reproducibility and rollback safety.",
+            "recommendation": "Pin the image to a specific version tag at minimum.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-15T09:30:00Z"
+          },
+          {
+            "check_id": "K8S-REL-001",
+            "title": "Container has an excessive restart count",
+            "severity": "high",
+            "cluster_context": "prod-demo-cluster",
+            "namespace": "payments",
+            "resource_kind": "Pod",
+            "resource_name": "cache-5d8f1",
+            "container_name": null,
+            "evidence": "Container 'redis' in pod 'cache-5d8f1' has restarted 9 time(s) (cumulative for the pod's current lifetime), meeting or exceeding the configured threshold of 5",
+            "impact": "Frequent restarts typically indicate crash looping or resource exhaustion.",
+            "recommendation": "Inspect this container's events and state for the root cause.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-15T09:30:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 0,
+          "high": 3,
+          "medium": 1,
+          "low": 0
+        }
+      },
+      "expected_fingerprint": "sha256:adb7b5dd29626a46905957e46f4917bef57d442a0149c6a547c9008e505affa0"
+    },
+    {
+      "name": "gitlab_representative_multi_finding",
+      "platform": "gitlab",
+      "report_schema_version": 1,
+      "notes": "The project's own golden GitLab report (6 findings, multiple severities and resource kinds).",
+      "report": {
+        "platform": "gitlab",
+        "gitlab_url": "https://gitlab.example.com",
+        "project_id": 4821,
+        "project_path": "engineering/checkout-service",
+        "default_branch": "main",
+        "generated_at": "2026-03-10T14:00:00Z",
+        "findings": [
+          {
+            "check_id": "GL-BR-001",
+            "title": "Default branch is not protected",
+            "severity": "high",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "ProtectedBranch",
+            "resource_name": "main",
+            "job_name": null,
+            "evidence": "Project path: 'engineering/checkout-service'. Default branch: 'main'. No exact, wildcard, or inherited protected-branch rule matched the default branch.",
+            "impact": "An unprotected default branch permits force-push, deletion, and unreviewed direct pushes by anyone with push access. The default branch is typically the deployment/release source of truth.",
+            "recommendation": "Create a protected-branch rule whose name matches the default branch, with push and merge access restricted appropriately.",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          },
+          {
+            "check_id": "GL-MR-001",
+            "title": "Successful pipelines are not required before merge",
+            "severity": "medium",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "Project",
+            "resource_name": "engineering/checkout-service",
+            "job_name": null,
+            "evidence": "The 'Pipelines must succeed' setting (only_allow_merge_if_pipeline_succeeds) is disabled.",
+            "impact": "Merge requests can be merged even when a pipeline fails, so any configured tests, builds, or security scans cannot reliably gate merges while this setting is disabled.",
+            "recommendation": "Enable 'Pipelines must succeed' in the project's merge request settings.",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          },
+          {
+            "check_id": "GL-COST-001",
+            "title": "Redundant pipelines are not automatically cancelled",
+            "severity": "low",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "Project",
+            "resource_name": "engineering/checkout-service",
+            "job_name": null,
+            "evidence": "Automatic cancellation of redundant pending pipelines (auto_cancel_pending_pipelines) is 'disabled'.",
+            "impact": "With automatic cancellation disabled, superseded pending pipelines may continue consuming runner capacity rather than being cancelled in favor of a newer run. Interruptible running pipelines may also continue consuming runner capacity and compute time instead of being stopped when superseded.",
+            "recommendation": "Enable automatic cancellation of redundant, pending pipelines, unless the project intentionally requires every pipeline to run to completion for compliance or audit-history purposes.",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          },
+          {
+            "check_id": "GL-REL-001",
+            "title": "Project job timeout exceeds a configurable threshold",
+            "severity": "medium",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "Project",
+            "resource_name": "engineering/checkout-service",
+            "job_name": null,
+            "evidence": "Configured project job timeout: 7200 seconds (120 minutes). Configured audit threshold: 3600 seconds (60 minutes).",
+            "impact": "An excessively long job timeout lets a hung job occupy a runner slot for longer, delaying feedback and potentially increasing compute cost.",
+            "recommendation": "Lower the project's default job timeout to a value appropriate for normal jobs, and use job-level timeout overrides only for legitimately long-running work. Projects with intentionally long builds may choose a higher threshold.",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          },
+          {
+            "check_id": "GL-CI-001",
+            "title": "CI job or service container image uses a mutable tag or no tag",
+            "severity": "high",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "CIJob",
+            "resource_name": "registry.example.com/checkout/build:latest",
+            "job_name": "build",
+            "evidence": "CI job 'build' uses image 'registry.example.com/checkout/build:latest' (tag: latest).",
+            "impact": "A mutable tag such as 'latest', or no tag at all, means the exact image content used by this CI job may differ from what ran previously or what will run next time, undermining reproducibility, rollback safety, and supply-chain traceability. CI images also run with pipeline (and potentially CI job token) permissions, so an unverifiable image is a sharper risk here than an equivalent finding on an idle workload. A specific version tag is a meaningful improvement over 'latest', but a tag can still be overwritten and re-pushed in the registry -- it is not itself a guarantee of immutability.",
+            "recommendation": "Pin the image to a specific version tag at minimum. For a content-addressed, truly immutable reference, pin to a digest instead or in addition (e.g. app@sha256:...).",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          },
+          {
+            "check_id": "GL-CI-001",
+            "title": "CI job or service container image uses a mutable tag or no tag",
+            "severity": "high",
+            "project_path": "engineering/checkout-service",
+            "resource_kind": "CIService",
+            "resource_name": "dynamic image reference",
+            "job_name": "build",
+            "evidence": "The CI image reference is dynamic and could not be statically verified.",
+            "impact": "A dynamic, runtime-resolved image reference cannot be evaluated from the CI configuration alone, so its reproducibility, rollback safety, and supply-chain traceability cannot be verified. This does not mean the effective image is necessarily unpinned -- only that CloudOps Guard cannot determine that statically.",
+            "recommendation": "Replace or constrain the CI/CD variable expression so the effective image reference can be statically verified, rather than relying on a value resolved only at runtime.",
+            "auto_remediable": false,
+            "audited_at": "2026-03-10T14:00:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 0,
+          "high": 3,
+          "medium": 2,
+          "low": 1
+        }
+      },
+      "expected_fingerprint": "sha256:1e35ad8c09ea96128e89b9984f050156a2ba41ed5f5034da1987bd34a7462216"
+    },
+    {
+      "name": "kubernetes_key_order_variant_a",
+      "platform": "kubernetes",
+      "report_schema_version": 1,
+      "notes": "Key-order equivalence pair (a): top-level and nested finding keys in 'natural' order.",
+      "report": {
+        "cluster_context": "prod",
+        "namespace_filter": null,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "findings": [
+          {
+            "check_id": "K8S-IMG-001",
+            "title": "Container uses the 'latest' tag",
+            "severity": "high",
+            "cluster_context": "prod",
+            "namespace": "default",
+            "resource_kind": "Pod",
+            "resource_name": "web-abc123",
+            "container_name": "web",
+            "evidence": "image: nginx:latest",
+            "impact": "Non-reproducible deployments.",
+            "recommendation": "Pin to a specific tag or digest.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 0,
+          "high": 1,
+          "medium": 0,
+          "low": 0
+        }
+      },
+      "expected_fingerprint": "sha256:fbee50e2b926a16ede484796bdbe49a138bb13807931a37caeb98667e538fba3"
+    },
+    {
+      "name": "kubernetes_key_order_variant_b",
+      "platform": "kubernetes",
+      "report_schema_version": 1,
+      "notes": "Key-order equivalence pair (b): SAME logical report as variant_a, every object's keys inserted in a deliberately different order -- must fingerprint identically to variant_a.",
+      "report": {
+        "summary": {
+          "critical": 0,
+          "high": 1,
+          "medium": 0,
+          "low": 0
+        },
+        "findings": [
+          {
+            "audited_at": "2026-01-01T00:00:00Z",
+            "auto_remediable": false,
+            "recommendation": "Pin to a specific tag or digest.",
+            "impact": "Non-reproducible deployments.",
+            "evidence": "image: nginx:latest",
+            "container_name": "web",
+            "resource_name": "web-abc123",
+            "resource_kind": "Pod",
+            "namespace": "default",
+            "cluster_context": "prod",
+            "severity": "high",
+            "title": "Container uses the 'latest' tag",
+            "check_id": "K8S-IMG-001"
+          }
+        ],
+        "generated_at": "2026-01-01T00:00:00Z",
+        "namespace_filter": null,
+        "cluster_context": "prod"
+      },
+      "expected_fingerprint": "sha256:fbee50e2b926a16ede484796bdbe49a138bb13807931a37caeb98667e538fba3"
+    },
+    {
+      "name": "kubernetes_unicode_rtl_combining",
+      "platform": "kubernetes",
+      "report_schema_version": 1,
+      "notes": "Unicode (CJK), RTL (Arabic/Hebrew), a combining-character sequence (cafe + U+0301), and an emoji outside the BMP (surrogate pair) in allowed free-form fields.",
+      "report": {
+        "cluster_context": "生产-cluster",
+        "namespace_filter": null,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "findings": [
+          {
+            "check_id": "K8S-IMG-001",
+            "title": "容器使用了 'latest' 标签",
+            "severity": "medium",
+            "cluster_context": "生产-cluster",
+            "namespace": "مجال-namespace",
+            "resource_kind": "Pod",
+            "resource_name": "café-pod",
+            "container_name": "web",
+            "evidence": "בדיקה: image uses :latest",
+            "impact": "Non-reproducible deployments. النشر غير قابل للتكرار.",
+            "recommendation": "Pin to a specific tag or digest. 🔒",
+            "auto_remediable": false,
+            "audited_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 0,
+          "high": 0,
+          "medium": 1,
+          "low": 0
+        }
+      },
+      "expected_fingerprint": "sha256:363d1c37e3555a26a6b38d85c7eb137c32cfb97477628a2aa09a76a269b253b7"
+    },
+    {
+      "name": "gitlab_unicode_rtl_combining",
+      "platform": "gitlab",
+      "report_schema_version": 1,
+      "notes": "Unicode (CJK), RTL (Arabic/Hebrew), a combining-character sequence, and a surrogate-pair emoji in allowed free-form GitLab fields.",
+      "report": {
+        "platform": "gitlab",
+        "gitlab_url": "https://gitlab.example.com",
+        "project_id": 1,
+        "project_path": "مجموعة/مشروع",
+        "default_branch": "main",
+        "generated_at": "2026-01-01T00:00:00Z",
+        "findings": [
+          {
+            "check_id": "GL-BR-001",
+            "title": "默认分支未受保护",
+            "severity": "critical",
+            "project_path": "مجموعة/مشروع",
+            "resource_kind": "ProtectedBranch",
+            "resource_name": "main",
+            "job_name": null,
+            "evidence": "café עברית RTL evidence text",
+            "impact": "Anyone with push access can force-push.",
+            "recommendation": "Add a protected branch rule. 🔒",
+            "auto_remediable": false,
+            "audited_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 1,
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        }
+      },
+      "expected_fingerprint": "sha256:3d1b0f6a5dcb5647d4df101fc5d90ee9352ffbe5b2a727484903b046798169ae"
+    },
+    {
+      "name": "kubernetes_float_summary_counts",
+      "platform": "kubernetes",
+      "report_schema_version": 1,
+      "notes": "summary counts given as integer-valued floats (1.0, 0.0) rather than ints -- must validate (numeric equality against the recomputed int counts) and fingerprint identically to the equivalent int-typed report.",
+      "report": {
+        "cluster_context": "prod",
+        "namespace_filter": null,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "findings": [
+          {
+            "check_id": "K8S-IMG-001",
+            "title": "Container uses the 'latest' tag",
+            "severity": "high",
+            "cluster_context": "prod",
+            "namespace": "default",
+            "resource_kind": "Pod",
+            "resource_name": "web-abc123",
+            "container_name": "web",
+            "evidence": "image: nginx:latest",
+            "impact": "Non-reproducible deployments.",
+            "recommendation": "Pin to a specific tag or digest.",
+            "auto_remediable": false,
+            "audited_at": "2026-01-01T00:00:00Z"
+          }
+        ],
+        "summary": {
+          "critical": 0.0,
+          "high": 1.0,
+          "medium": 0.0,
+          "low": 0.0
+        }
+      },
+      "expected_fingerprint": "sha256:fbee50e2b926a16ede484796bdbe49a138bb13807931a37caeb98667e538fba3"
+    }
+  ]
+}

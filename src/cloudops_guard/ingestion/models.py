@@ -18,6 +18,7 @@ exactly.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
@@ -160,6 +161,53 @@ class Tombstone(BaseModel):
         if self.deleted_at < self.retired_at:
             raise ValueError("deleted_at must not precede retired_at.")
         return self
+
+
+@dataclass(frozen=True, slots=True)
+class PurgeClaim:
+    """**Phase 4D second correction pass, item 1**: an opaque token
+    `MetadataStore.begin_purge` issues for an eligible (`retired`)
+    record, bound to that record's internal `generation` (a monotonic
+    counter incremented every time a NEW record is created under a given
+    `(tenant_id, ingestion_id)` key -- including a tombstone-expiry-then-
+    reuse cycle, which is otherwise indistinguishable from "this key was
+    always this identity" once the tombstone has expired, per §E.4's own
+    documented design) **and** to `claim_id`, a globally-unique
+    per-acquisition identifier.
+
+    **Purge-claim hardening pass (`claim_id` added)**: `generation` alone
+    is *not* enough to identify a single acquisition -- two entirely
+    separate `begin_purge` calls against the exact same, unchanged
+    `retired` record (e.g. claim A, released, then claim B acquired
+    afterward) share the identical `generation`, since nothing about the
+    underlying record changed between them. A generation-only identity
+    check cannot tell A and B apart: releasing A after B has already been
+    granted would incorrectly cancel B's exclusivity (an ABA problem),
+    and a stale A could still successfully `finalize_purge` after being
+    released, or after B superseded it. `claim_id` closes this: it is
+    unique to *this exact acquisition* and never reused, so `(generation,
+    claim_id)` together -- never `generation` alone -- is what
+    `MetadataStore` compares against its own currently active claim to
+    decide whether `release_purge_claim`/`finalize_purge` may act. An
+    "exact claim" anywhere in this store's documentation means a claim
+    matching on **both** fields, not merely a generation-equivalent one.
+
+    Callers must pass this exact claim to `MetadataStore.finalize_purge`,
+    which refuses to transition a record to `deleted` if this is no
+    longer the currently active claim -- whether because it was already
+    released, superseded by a later acquisition for the same generation,
+    or because the generation itself is no longer current (e.g. a full
+    retire -> purge -> tombstone-expire -> reuse cycle completed since
+    this claim was issued). Never serialized, never returned from any
+    HTTP endpoint, never a customer-visible concept -- purely an internal
+    cross-store coordination primitive local to one process's storage
+    layer.
+    """
+
+    tenant_id: str
+    ingestion_id: str
+    generation: int
+    claim_id: int
 
 
 class TokenRecord(BaseModel):

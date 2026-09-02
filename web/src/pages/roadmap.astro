@@ -102,11 +102,14 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         behavior is unaffected.
       </p>
       <p>
-        Phase 4B has since added local, in-memory reference storage and token-record code inside the
-        CloudOps Guard Python package (not this website's codebase), and a later, uncommitted,
-        pending-review Phase 4C has added real Argon2id authentication mechanics on top of it &mdash;
-        still no HTTP endpoint, no network-reachable server, no uploader, no production storage, and
-        nothing deployed anywhere. That work has no bearing on this site or its own no-upload behavior.
+        Phase 4B and Phase 4C have since added local, in-memory reference storage and real Argon2id
+        authentication mechanics inside the CloudOps Guard Python package (not this website's codebase),
+        and a later, uncommitted, pending-review Phase 4D has implemented the four designed API endpoints
+        on top of that foundation &mdash; but strictly as a <strong>local/staging-only</strong> service:
+        it exists only as code a developer can run themselves against a loopback address for testing
+        &mdash; no network-reachable or customer-reachable server, no deployment of any kind, no real
+        customer credential, and no uploader CLI exist. That work has no bearing on this site or its own
+        no-upload behavior.
       </p>
     </div>
   </section>
