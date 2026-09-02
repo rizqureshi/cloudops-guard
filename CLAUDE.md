@@ -458,7 +458,68 @@ regardless of which milestone is currently in progress.
   nothing is durable beyond process memory. No new dependency was added.
   This work is **uncommitted**, pending independent review; it does not
   authorize Phase 4C (an HTTP API), production storage, credentials,
-  deployment, tagging, or a release.
+  deployment, tagging, or a release. **Phase 4B has since been committed
+  and pushed** (commit `363cdf179945d7c93b78a25edb7b7fc416ac8da8`, `feat:
+  add ingestion storage reference layer`; both `CI` and `Web CI` passed).
+  **Phase 4C — authentication implementation — has since implemented the
+  `<lookup_id>.<secret>` token format** (`token_format.py`), **secure
+  token generation and Argon2id hashing** (`token_issuance.py`,
+  `argon2_backend.py`, adding the one approved new dependency,
+  `argon2-cffi`, confined to `argon2_backend.py`), **the three-layer
+  abuse-protection scope keys and a credential-free capabilities check**
+  (`abuse_protection.py`), and **a framework-independent authentication
+  coordinator and scope-authorization function**
+  (`authenticator.py`: `AuthenticationCoordinator`, `AuthenticatedPrincipal`,
+  `authorize`) — implementing `TokenStore`'s complete, approved
+  `lookup`/`verify_secret`/`mark_revoked` interface end to end via
+  `Argon2SecretVerifier`, and the exact Layer 1 (pre-Argon2id,
+  per-`lookup_id`) / Layer 2 (per-source, covering malformed tokens and
+  unknown `lookup_id`s and the future capabilities endpoint) / Layer 3
+  (per-authenticated-token, checked only after success, `is_blocked`-only
+  — this coordinator never calls `AttemptLimiter.record_failure` for
+  Layer 3, since an ordinary successful request is not a "failure")
+  ordering §F specifies. A documented manual, out-of-band provisioning
+  procedure (`docs/manual-token-provisioning.md`) covers `provision_token`;
+  no production insertion mechanism, self-service UI, or real customer
+  token exists. **None of this is an HTTP API, a network-reachable
+  endpoint, production storage, or a real credential**: no HTTP
+  framework, route, handler, or server; no database, object store, or
+  cloud SDK; `provision_token` never inserts into any `TokenStore`
+  (storage insertion for a real deployment remains an explicit later
+  production-store responsibility). This work is **uncommitted**, pending
+  independent review; it does not authorize Phase 4D (the HTTP API),
+  deployment, tagging, or a release. **A subsequent, focused Phase 4C
+  security correction pass** (also uncommitted) fixed three independently
+  reproduced contract violations found in the initial Phase 4C
+  implementation: (1) `ParsedToken`/`ProvisionedToken` were
+  `dataclasses.dataclass`es whose `repr`/`str` were redacted but whose
+  fields were still fully recoverable via `dataclasses.asdict()` —
+  replaced with plain, `__slots__`-only, non-dataclass value objects
+  (`_secure_value.ImmutableRedactedValue`) that are immutable, have no
+  instance `__dict__`, are not dataclasses, are not JSON-serializable,
+  and explicitly refuse pickling (`__reduce__`/`__getstate__`), confirmed
+  by a mutation test that the plaintext secret genuinely appears in a raw
+  `pickle.dumps()` byte stream without that refusal; (2) the public
+  `provision_token(..., hasher=...)` parameter let any caller substitute
+  an insecure hasher (e.g. one returning recoverable plaintext), which
+  would then be stored verbatim in `TokenRecord.secret_hash` — the
+  parameter was removed outright; `provision_token` now always uses the
+  real `Argon2SecretVerifier` and additionally validates its own output
+  as genuine Argon2id (`argon2_backend.require_argon2id_hash`) before
+  constructing a `TokenRecord`, failing closed if that invariant is
+  violated; tests needing a fast stand-in now construct `TokenRecord`
+  directly with an opaque, secret-free placeholder hash instead; (3)
+  `Argon2SecretVerifier` delegated to `argon2-cffi`'s `PasswordHasher.verify()`
+  without checking the encoded hash's algorithm, so a well-formed Argon2i
+  or Argon2d hash verified successfully against its correct secret,
+  violating the Argon2id-only contract — every hash `Argon2SecretVerifier`
+  is asked to verify or willing to produce is now first parsed with the
+  library's own `argon2.extract_parameters` and checked to be exactly
+  `Type.ID`; `__init__` additionally refuses to wrap a non-Argon2id-
+  configured `PasswordHasher`, and `hash()` independently re-validates
+  its own output as defense in depth. All three were confirmed via a
+  reproduce-before-fix probe and a deliberate source mutation per
+  guarantee, each caught by its intended test before being reverted.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
@@ -500,15 +561,20 @@ see `docs/milestones/v0.3.0-interactive-web-demo.md` for full rationale.
 These apply once v0.4.0 ingestion-API/uploader implementation begins (Phase
 4B onward); see `docs/milestones/v0.4.0-ingestion-api.md` for full
 rationale. **Phase 4A was documentation and contract design only. Phase 4B
-(uncommitted; see above) has implemented local, in-memory reference
+(committed; see above) has implemented local, in-memory reference
 storage/token interfaces (`src/cloudops_guard/ingestion/`) satisfying the
 storage-layer mechanics some of the invariants below describe — atomic
 create-or-return-existing, the idempotency window, and the retirement/
-purge/tombstone lifecycle are now real, tested Python code. No HTTP API,
-no authentication (Argon2id or otherwise), no uploader, no production
-storage, and no deployment exist yet — everything below that describes
-the API surface, the uploader CLI, or a real credential remains
-unimplemented.**
+purge/tombstone lifecycle are now real, tested Python code. Phase 4C
+(uncommitted; see above) has since implemented real Argon2id hashing and
+verification, the `lookup_id`/`secret` token structure, a framework-
+independent authentication coordinator enforcing the three-layer
+abuse-protection ordering below (Argon2id is ever invoked only after
+Layers 1 and 2 both pass), and per-scope authorization — still no HTTP
+API, no uploader, no production credential store, and no deployment exist
+yet — everything below that describes the API surface, the uploader CLI,
+or a real customer credential remains unimplemented. No real credential
+has been issued or provisioned.**
 
 - The ingestion API is a separate service and separate security boundary
   from the public website — it must never be folded into `web/`'s Worker,

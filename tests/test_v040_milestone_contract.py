@@ -1123,41 +1123,48 @@ class TestPhase4BDocumentationMatchesRealCode:
         assert "Phase 4B has implemented" in milestone_bullet
         assert "uncommitted" in milestone_bullet.lower()
 
-    def test_milestone_doc_states_phase_4b_is_implemented_but_uncommitted(
+    def test_milestone_doc_states_phase_4b_is_committed_and_phase_4c_is_uncommitted(
         self, milestone_text: str
     ) -> None:
-        assert "Phase 4B (uncommitted, pending independent review) has since implemented" in (
+        assert "Phase 4B (committed and pushed, commit" in milestone_text
+        assert "Phase 4C (uncommitted, pending independent review) has since implemented" in (
             milestone_text
         )
 
-    def test_only_phase_4b_is_marked_implemented_in_the_phase_plan(
+    def test_only_phase_4b_and_4c_are_marked_implemented_in_the_phase_plan(
         self, milestone_text: str
     ) -> None:
-        # Guards against a careless future edit marking a later phase (4C+)
-        # implemented before it actually is: exactly one "Status:
-        # implemented" marker may exist in the phase-plan section, and it
-        # must belong to Phase 4B specifically.
+        # Guards against a careless future edit marking a later phase (4D+)
+        # implemented before it actually is: exactly two "Status:
+        # implemented" markers may exist in the phase-plan section, and
+        # they must belong to Phase 4B and Phase 4C specifically, in order.
         phase_plan_section = _extract_section(
             milestone_text, r"## I\. Phase plan \(Phase 4B through 4G, proposed\)", r"$"
         )
         markers = [m.start() for m in re.finditer(r"Status: implemented", phase_plan_section)]
-        assert len(markers) == 1, (
-            f"expected exactly one phase marked implemented in the phase plan, found {len(markers)}"
+        assert len(markers) == 2, (
+            f"expected exactly two phases marked implemented in the phase plan, "
+            f"found {len(markers)}"
         )
         phase_4b_heading = phase_plan_section.find("Phase 4B — Storage and token interfaces")
+        phase_4c_heading = phase_plan_section.find("Phase 4C — Authentication implementation")
+        phase_4d_heading = phase_plan_section.find("Phase 4D —")
         assert phase_4b_heading != -1
-        assert phase_4b_heading < markers[0] < phase_plan_section.find("Phase 4C —")
+        assert phase_4c_heading != -1
+        assert phase_4d_heading != -1
+        assert phase_4b_heading < markers[0] < phase_4c_heading
+        assert phase_4c_heading < markers[1] < phase_4d_heading
 
     def test_readme_and_roadmap_mention_phase_4b(self, roadmap_text: str) -> None:
         readme_text = _read(README_MD)
         assert "Phase 4B" in readme_text
         assert "Phase 4B" in roadmap_text
 
-    def test_no_document_claims_an_http_api_authentication_or_uploader_exists(self) -> None:
+    def test_no_document_claims_an_http_api_or_uploader_exists(self) -> None:
         # A positive, closed check: every source-of-truth file's Phase-4B
-        # mention must sit within one sentence of an explicit "no HTTP
-        # endpoint" / "no authentication" / "no uploader" style disclaimer,
-        # not merely omit a claim of completeness.
+        # mention must sit within the same file as an explicit "no HTTP
+        # endpoint" / "no uploader" style disclaimer, not merely omit a
+        # claim of completeness.
         for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
             text = _normalize_whitespace(_read(path))
             if "Phase 4B" not in text:
@@ -1166,9 +1173,33 @@ class TestPhase4BDocumentationMatchesRealCode:
             assert "no http" in lowered or "no api" in lowered, (
                 f"{path}: mentions Phase 4B without disclaiming an HTTP/API endpoint"
             )
-            assert "no authentication" in lowered or "no auth" in lowered, (
-                f"{path}: mentions Phase 4B without disclaiming authentication"
-            )
+
+    def test_authentication_is_never_attributed_to_phase_4b_itself(
+        self, milestone_text: str, claude_md_text: str
+    ) -> None:
+        # Phase 4C -- a separate, later phase -- legitimately implements
+        # real Argon2id authentication, so "authentication" now
+        # legitimately appears in these documents; what must never happen
+        # is Phase 4B's *own* paragraph claiming it. Checked precisely by
+        # extracting each phase's own paragraph and asserting the
+        # authentication claim sits only in Phase 4C's.
+        phase_4b_paragraph = _extract_section(
+            claude_md_text, r"Phase 4B has implemented the storage and token", r"  \*\*Phase 4C —"
+        )
+        assert "no authentication" not in phase_4b_paragraph.lower()
+        # Phase 4B's own paragraph may *name* authentication only as
+        # something it explicitly does not provide.
+        if "authentication" in phase_4b_paragraph.lower():
+            assert (
+                "no authentication" in phase_4b_paragraph.lower()
+                or "none of this is" in phase_4b_paragraph.lower()
+            ), "CLAUDE.md's Phase 4B paragraph mentions authentication without disclaiming it"
+
+        phase_4c_paragraph = _extract_section(
+            claude_md_text, r"Phase 4C — authentication implementation", r"- Do not introduce"
+        )
+        assert "argon2id" in phase_4c_paragraph.lower()
+        assert "uncommitted" in phase_4c_paragraph.lower()
 
     def test_no_document_claims_production_storage_or_deployment_from_phase_4b(self) -> None:
         for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
@@ -1188,3 +1219,97 @@ class TestPhase4BDocumentationMatchesRealCode:
         # regardless of what a later phase has since implemented.
         assert "is documentation and contract design only" in milestone_text
         assert "Phase 4A was documentation and contract design only" in claude_md_text
+
+
+# --- (h) Phase 4C: real authentication mechanics exist, but no HTTP layer --
+
+INGESTION_AUTH_MODULE_FILES = [
+    "token_format.py",
+    "token_issuance.py",
+    "argon2_backend.py",
+    "abuse_protection.py",
+    "authenticator.py",
+]
+
+MANUAL_PROVISIONING_DOC = REPO_ROOT / "docs" / "manual-token-provisioning.md"
+
+
+class TestPhase4CDocumentationMatchesRealCode:
+    """Mirrors `TestPhase4BDocumentationMatchesRealCode` for Phase 4C: the
+    opposite drift direction again -- the stale "no authentication exists
+    yet" claim must not silently survive now that real Argon2id
+    authentication mechanics exist, while every claim that no HTTP
+    endpoint/real credential/deployment exists must remain true and
+    checkable.
+    """
+
+    @pytest.mark.parametrize("filename", INGESTION_AUTH_MODULE_FILES)
+    def test_documented_phase_4c_source_file_exists(self, filename: str) -> None:
+        path = INGESTION_PACKAGE_DIR / filename
+        assert path.is_file(), (
+            f"CLAUDE.md/the milestone doc describe a Phase 4C "
+            f"src/cloudops_guard/ingestion/{filename} that does not exist on disk"
+        )
+
+    def test_manual_provisioning_procedure_document_exists(self) -> None:
+        assert MANUAL_PROVISIONING_DOC.is_file()
+
+    def test_manual_provisioning_doc_never_contains_a_real_looking_secret(self) -> None:
+        # A conservative structural check: no run of 40+ URL-safe-base64
+        # characters (the shape a real lookup_id/secret takes) appears
+        # anywhere in this document -- every example is a placeholder.
+        text = _read(MANUAL_PROVISIONING_DOC)
+        assert re.search(r"[A-Za-z0-9_-]{40,}", text) is None, (
+            "manual-token-provisioning.md contains a suspiciously token-shaped string"
+        )
+
+    def test_claude_md_mentions_the_argon2_dependency(self, claude_md_text: str) -> None:
+        assert "argon2-cffi" in claude_md_text
+
+    def test_claude_md_states_phase_4c_is_uncommitted(self, claude_md_text: str) -> None:
+        phase_4c_paragraph = _extract_section(
+            claude_md_text, r"Phase 4C — authentication implementation", r"- Do not introduce"
+        )
+        assert "uncommitted" in phase_4c_paragraph.lower()
+
+    def test_no_document_claims_an_http_endpoint_exists_from_phase_4c(self) -> None:
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4C" not in text:
+                continue
+            lowered = text.lower()
+            assert "no http" in lowered or "no network-reachable" in lowered, (
+                f"{path}: mentions Phase 4C without disclaiming an HTTP/network-reachable endpoint"
+            )
+
+    def test_no_document_claims_deployment_from_phase_4c(self) -> None:
+        for path in [MILESTONE_DOC, CLAUDE_MD, README_MD, ROADMAP_ASTRO, PRIVACY_ASTRO]:
+            text = _normalize_whitespace(_read(path))
+            if "Phase 4C" not in text:
+                continue
+            lowered = text.lower()
+            assert (
+                "no deployment" in lowered
+                or "nothing deployed" in lowered
+                or "nothing is deployed" in lowered
+            ), f"{path}: mentions Phase 4C without disclaiming deployment"
+
+    def test_claude_md_and_milestone_doc_disclaim_a_real_credential_from_phase_4c(
+        self, claude_md_text: str, milestone_text: str
+    ) -> None:
+        # The two authoritative, detailed source-of-truth documents must
+        # say this explicitly; the shorter public-facing website blurbs
+        # (roadmap/privacy) already imply it via "no production storage"/
+        # "nothing deployed" without needing the literal word repeated.
+        for text in (claude_md_text, milestone_text):
+            lowered = text.lower()
+            assert "real" in lowered and (
+                "no real" in lowered or "not a real" in lowered or "never a real" in lowered
+            )
+
+    def test_phase_4b_committed_status_is_consistent_across_documents(
+        self, milestone_text: str, claude_md_text: str
+    ) -> None:
+        commit_sha = "363cdf179945d7c93b78a25edb7b7fc416ac8da8"
+        assert commit_sha in milestone_text
+        assert commit_sha in claude_md_text

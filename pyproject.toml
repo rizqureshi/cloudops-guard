@@ -15,6 +15,7 @@ dependencies = [
     # the collector imports urllib3.exceptions directly to classify transport
     # failures (connection/DNS/TLS) separately from Kubernetes API errors.
     "urllib3>=2.0.0",
+    "argon2-cffi>=25.1.0",
 ]
 
 [project.scripts]

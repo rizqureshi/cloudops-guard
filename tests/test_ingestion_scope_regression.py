@@ -1,9 +1,16 @@
-"""Architecture/scope regression tests (§9.G): prove the Phase 4B
-`cloudops_guard.ingestion` package exposes no HTTP endpoint, starts no
-server or background worker, performs no network request, and imports no
-web framework / cloud SDK / database driver / secret-manager SDK. Also
-proves the website's browser-only report-privacy invariants are
-untouched by this Python-only phase.
+"""Architecture/scope regression tests (§9.G, extended for Phase 4C):
+prove the `cloudops_guard.ingestion` package exposes no HTTP endpoint,
+starts no server or background worker, performs no network request, and
+imports no web framework / cloud SDK / database driver / secret-manager
+SDK. Also proves the website's browser-only report-privacy invariants are
+untouched by this Python-only package.
+
+Phase 4C added exactly one new third-party import, `argon2` (via the
+approved `argon2-cffi` dependency, confined to `argon2_backend.py` only --
+see `TestArgon2ImportIsConfinedToOneFile`) -- everything else this file
+checks (no HTTP/network/database/server behavior, no deployment
+artifacts, no website leakage) applies identically to every Phase 4C
+module.
 
 These assertions inspect the actual files on disk via `ast` (never a
 hand-maintained substitute for reading real imports), mirroring the
@@ -52,7 +59,11 @@ FORBIDDEN_MODULE_PREFIXES = (
     "httpx",
     "urllib.request",
     "urllib3",
-    "argon2",
+    # `argon2` (argon2-cffi) is deliberately *not* listed here as of
+    # Phase 4C -- it is the one approved, justified dependency addition
+    # (`argon2_backend.py`'s own module docstring). Every other hashing/
+    # crypto library remains forbidden: this project uses exactly one
+    # secret-hashing implementation, never several competing ones.
     "bcrypt",
     "passlib",
     "hvac",  # Vault client
@@ -102,10 +113,12 @@ class TestNoForbiddenImports:
                 violations[path.name] = bad
         assert violations == {}, f"forbidden imports found: {violations}"
 
-    def test_only_stdlib_and_pydantic_are_imported(self) -> None:
-        # A tighter, allowlist-based companion to the denylist check above:
-        # every third-party import in this package must be `pydantic`.
-        allowed_third_party = {"pydantic"}
+    def test_only_stdlib_and_approved_third_party_packages_are_imported(self) -> None:
+        # A tighter, allowlist-based companion to the denylist check
+        # above: every third-party import in this package must be one of
+        # exactly two approved packages -- `pydantic` (Phase 4B) and
+        # `argon2` (Phase 4C, argon2-cffi).
+        allowed_third_party = {"pydantic", "argon2"}
         stdlib_prefixes = (
             "__future__",
             "abc",
@@ -113,6 +126,8 @@ class TestNoForbiddenImports:
             "dataclasses",
             "datetime",
             "enum",
+            "re",
+            "secrets",
             "threading",
             "typing",
         )
@@ -128,19 +143,37 @@ class TestNoForbiddenImports:
                 )
 
 
+class TestArgon2ImportIsConfinedToOneFile:
+    def test_only_argon2_backend_imports_argon2(self) -> None:
+        # The one approved new Phase 4C dependency must be confined to
+        # its one designated module -- proving no other file grew its own,
+        # possibly-inconsistent, direct Argon2id usage.
+        importing_files = []
+        for path in _iter_ingestion_source_files():
+            tree = ast.parse(path.read_text(), filename=str(path))
+            imports = _collect_imports(tree)
+            if any(module == "argon2" or module.startswith("argon2.") for module in imports):
+                importing_files.append(path.name)
+        assert importing_files == ["argon2_backend.py"]
+
+
 class TestNoNetworkOrServerBehavior:
     def test_no_socket_usage_in_source(self) -> None:
         for path in _iter_ingestion_source_files():
             source = path.read_text()
             assert "socket" not in source, f"{path.name} references 'socket'"
 
-    def test_importing_the_package_opens_no_sockets(self) -> None:
+    def test_importing_every_module_opens_no_sockets_or_threads(self) -> None:
         before = threading.active_count()
         importlib.reload(ingestion_package)
-        importlib.import_module("cloudops_guard.ingestion.reference")
-        importlib.import_module("cloudops_guard.ingestion.interfaces")
+        for path in _iter_ingestion_source_files():
+            if path.stem == "__init__":
+                continue
+            importlib.import_module(f"cloudops_guard.ingestion.{path.stem}")
         after = threading.active_count()
-        # Importing must not start any background thread.
+        # Importing must not start any background thread. Derived from
+        # the real file list (never a hand-maintained module-name list),
+        # so a future new module is automatically covered too.
         assert after == before
 
     def test_no_running_server_socket_bound_by_this_process_for_ingestion(self) -> None:
@@ -167,14 +200,12 @@ class TestNoDeploymentOrDatabaseArtifacts:
             assert path.name not in suspicious_names, message
 
     def test_no_module_level_database_connection_or_app_object(self) -> None:
-        for module_name in (
-            "cloudops_guard.ingestion.models",
-            "cloudops_guard.ingestion.interfaces",
-            "cloudops_guard.ingestion.reference",
-            "cloudops_guard.ingestion.storage_keys",
-            "cloudops_guard.ingestion.errors",
-        ):
-            module = importlib.import_module(module_name)
+        # Derived from the real file list (never a hand-maintained module-
+        # name list), so a future new module is automatically covered.
+        for path in _iter_ingestion_source_files():
+            if path.stem == "__init__":
+                continue
+            module = importlib.import_module(f"cloudops_guard.ingestion.{path.stem}")
             for name, value in vars(module).items():
                 if name.startswith("_"):
                     continue
@@ -199,6 +230,9 @@ class TestWebsitePrivacyInvariantsUntouched:
         "InMemoryReportBlobStore",
         "InMemoryTokenStore",
         "InMemoryAttemptLimiter",
+        "AuthenticationCoordinator",
+        "Argon2SecretVerifier",
+        "provision_token",
     )
 
     def test_ingestion_package_is_not_referenced_from_the_web_directory(self) -> None:
