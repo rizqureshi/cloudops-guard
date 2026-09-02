@@ -20,7 +20,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra api
 
       - name: Run tests
         run: uv run pytest
