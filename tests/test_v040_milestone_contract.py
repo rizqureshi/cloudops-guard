@@ -49,6 +49,10 @@ LOCAL_REPORT_PRIVACY_ASTRO = (
     REPO_ROOT / "web" / "src" / "pages" / "learn" / "local-report-privacy.astro"
 )
 README_MD = REPO_ROOT / "README.md"
+INGESTION_DEPLOYMENT_DOC = REPO_ROOT / "docs" / "deployment" / "ingestion-production.md"
+PILOT_RUNBOOK = REPO_ROOT / "docs" / "pilots" / "ingestion-pilot-runbook.md"
+PHASE_4G_CHECKLIST = REPO_ROOT / "docs" / "pilots" / "phase-4g-authorization-checklist.md"
+PHASE_4F_SECURITY_REVIEW = REPO_ROOT / "docs" / "reviews" / "v0.4.0-phase-4f-security-readiness.md"
 
 
 def _read(path: Path) -> str:
@@ -89,6 +93,26 @@ def claude_md_text() -> str:
 @pytest.fixture(scope="module")
 def roadmap_text() -> str:
     return _read(ROADMAP_ASTRO)
+
+
+@pytest.fixture(scope="module")
+def ingestion_deployment_doc_text() -> str:
+    return _read(INGESTION_DEPLOYMENT_DOC)
+
+
+@pytest.fixture(scope="module")
+def pilot_runbook_text() -> str:
+    return _read(PILOT_RUNBOOK)
+
+
+@pytest.fixture(scope="module")
+def phase_4g_checklist_text() -> str:
+    return _read(PHASE_4G_CHECKLIST)
+
+
+@pytest.fixture(scope="module")
+def phase_4f_security_review_text() -> str:
+    return _read(PHASE_4F_SECURITY_REVIEW)
 
 
 def _claude_invariants_section(claude_md_text: str) -> str:
@@ -1455,3 +1479,270 @@ class TestPhase4DDocumentationMatchesRealCode:
         ).lower()
         assert "uncommitted" in nearby
         assert "does not authorize phase 4e" in nearby
+
+
+# --- Phase 4F correction pass: provider/region decision boundary ------------
+
+
+class TestProviderRegionDecisionIsAPreconditionNotAnActivity:
+    """The Phase 4F correction pass fixed documents that incorrectly said or
+    implied provider/region selection happens *within* Phase 4G. The correct
+    sequence is: Phase 4F reviewed/committed -> user records provider/region
+    -> user reviews/approves provider-specific cost and budget -> Phase 4G
+    may be authorized to begin -> Phase 4G executes the already-approved
+    architecture. These tests pin that sequence in the documents that state
+    it, so a later edit cannot silently reintroduce the ambiguous framing.
+    """
+
+    def test_deployment_doc_states_the_corrected_five_step_sequence(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "is **not** a Phase 4G activity" in text
+        assert "precondition that must be satisfied" in text
+        assert "before Phase 4G may be authorized to begin at all" in text
+
+    def test_deployment_doc_region_bullet_calls_it_a_precondition_to_authorizing(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "a mandatory precondition to *authorizing* Phase 4G" in text
+        assert "not an activity performed during it" in text
+
+    def test_deployment_doc_blocker_list_separates_authorization_from_execution(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "block *authorizing* Phase 4G at all" in text
+        assert "preconditions to starting it, not activities performed within it" in text
+
+    def test_deployment_doc_cost_figures_are_disclaimed_as_qualitative(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "qualitative comparisons" in text
+        assert "not a numerical cost estimate" in text
+        assert "must never be read as one" in text
+
+    def test_deployment_doc_managed_service_claims_are_qualified(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "not a verified claim about any specific provider's current" in text
+        assert "re-verified against that provider's own authoritative" in text
+
+    def test_checklist_has_a_preconditions_section_separate_from_execution(
+        self, phase_4g_checklist_text: str
+    ) -> None:
+        text = _normalize_whitespace(phase_4g_checklist_text)
+        assert "## Preconditions to authorizing Phase 4G at all" in text
+        assert "## Phase 4G execution checklist" in text
+        preconditions = _extract_section(
+            phase_4g_checklist_text,
+            r"## Preconditions to authorizing Phase 4G at all",
+            r"## Phase 4G execution checklist",
+        )
+        assert "Provider and region/data-residency decision" in preconditions
+        assert "Provider-specific cost estimate and budget approval" in preconditions
+
+    def test_checklist_execution_items_do_not_include_region_selection(
+        self, phase_4g_checklist_text: str
+    ) -> None:
+        execution_section = _extract_section(
+            phase_4g_checklist_text,
+            r"## Phase 4G execution checklist",
+            r"## What Phase 4F actually completed",
+        )
+        # Region/data-residency acceptance moved to the preconditions section;
+        # the execution checklist must not independently re-list it as one of
+        # its own boxes (that would re-imply it happens during Phase 4G).
+        assert "Region/data-residency acceptance" not in execution_section
+
+    def test_runbook_region_section_points_to_the_precondition_sequence(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "mandatory precondition to *authorizing* Phase 4G" in text
+        assert "Preconditions to authorizing Phase 4G at all" in text
+
+    def test_no_document_says_region_acceptance_remains_exclusively_phase_4g(
+        self,
+        ingestion_deployment_doc_text: str,
+        pilot_runbook_text: str,
+        phase_4g_checklist_text: str,
+        phase_4f_security_review_text: str,
+    ) -> None:
+        # The specific ambiguous phrasing the correction pass removed --
+        # region acceptance framed as purely a Phase 4G-internal activity,
+        # with no mention that the decision itself is a precondition to
+        # authorizing Phase 4G in the first place.
+        forbidden = "region acceptance, and the first real pilot remain exclusively phase 4g"
+        for text in (
+            ingestion_deployment_doc_text,
+            pilot_runbook_text,
+            phase_4g_checklist_text,
+            phase_4f_security_review_text,
+        ):
+            assert forbidden not in _normalize_whitespace(text).lower()
+
+    def test_no_document_frames_region_acceptance_itself_as_a_phase_4g_activity(
+        self,
+        ingestion_deployment_doc_text: str,
+        pilot_runbook_text: str,
+        phase_4g_checklist_text: str,
+        phase_4f_security_review_text: str,
+    ) -> None:
+        # A regex, word-proximity check rather than an exact-substring one:
+        # a follow-up correction found that an earlier fix's own rewrite
+        # ("real region acceptance ... remain exclusively **within** Phase
+        # 4G's own execution") still framed region *acceptance* -- the
+        # human decision itself -- as a Phase 4G-internal activity, and the
+        # prior exact-substring `forbidden` check above did not catch it
+        # because two extra words ("real", "within") were interposed. This
+        # check instead looks for "region acceptance" occurring near
+        # "exclusively"/"Phase 4G" regardless of exactly which words sit
+        # between them, so a similar future rewrite cannot silently slip
+        # past by adding or removing a word or two.
+        pattern = re.compile(
+            r"region\s+acceptance\b.{0,60}\bexclusively\b.{0,40}\bphase\s*4g", re.DOTALL
+        )
+        for text in (
+            ingestion_deployment_doc_text,
+            pilot_runbook_text,
+            phase_4g_checklist_text,
+            phase_4f_security_review_text,
+        ):
+            normalized = _normalize_whitespace(text).lower()
+            match = pattern.search(normalized)
+            assert match is None, (
+                f"region-acceptance-as-Phase-4G-activity phrasing found: {match.group(0)!r}"
+            )
+
+
+# --- Phase 4F correction pass: full-pilot deletion and offboarding ----------
+
+
+class TestOffboardingRequiresAuditedTenantInventoryNotJustCustomerIds:
+    """The Phase 4F correction pass fixed the runbook's claim that deleting
+    every customer-retained `ingestion_id` is sufficient for full pilot
+    deletion -- it is not, since a customer can lose an ID, an upload can
+    happen without the customer's own record, or a compromised token can
+    create an ingestion the customer never knew about. These tests pin the
+    corrected requirements so they cannot silently regress.
+    """
+
+    def test_runbook_does_not_claim_customer_id_list_alone_is_sufficient(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "never satisfied merely by deleting every" in text
+        assert "insufficient for a *complete* deletion" in text
+
+    def test_runbook_public_api_still_lacks_a_bulk_delete_endpoint_and_none_is_added(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "this pass does not add one" in text.lower()
+        assert (
+            "none should ever be added as a public, customer-reachable" in text
+            or "not a public, customer-reachable API endpoint" in text
+        )
+
+    def test_runbook_declares_operator_only_inventory_mechanism_as_hard_blocker(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "Hard blocker: complete pilot offboarding cannot be guaranteed today" in text
+        assert "**audited, operator-only** method" in text
+
+    def test_runbook_inventory_mechanism_does_not_rely_solely_on_customer_ids(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "never** from the customer's own retained" in text
+
+    def test_runbook_inventory_mechanism_is_tenant_scoped_least_privilege_and_audited(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        for phrase in (
+            "**tenant-scoped**",
+            "**least-privilege**",
+            "**logged without report or token content**",
+            "**resistant to accidentally selecting another tenant**",
+        ):
+            assert phrase in text, f"missing required inventory-mechanism property: {phrase!r}"
+
+    def test_runbook_distinguishes_the_four_deletion_confirmation_levels(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        for phrase in (
+            "**Immediate unreadability**",
+            "**Confirmed primary purge**",
+            "**Tombstone disclosure**",
+            "**Backup rotation/expiry**",
+        ):
+            assert phrase in text, f"missing deletion-confirmation level: {phrase!r}"
+
+    def test_runbook_never_infers_backup_rotation_from_elapsed_time_alone(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "not inferred from" in text
+        assert "elapsed time alone is not verification" in text
+
+    def test_runbook_documents_the_missing_ingestion_id_tabletop_scenario(
+        self, pilot_runbook_text: str
+    ) -> None:
+        text = _normalize_whitespace(pilot_runbook_text)
+        assert "Tabletop test: incomplete customer-provided inventory" in text
+        assert "one real ingestion for their tenant is missing from that list" in text
+        assert "must still identify and retire/purge that missing record" in text
+
+    def test_checklist_lists_the_inventory_mechanism_as_required_before_execution(
+        self, phase_4g_checklist_text: str
+    ) -> None:
+        text = _normalize_whitespace(phase_4g_checklist_text)
+        assert "An audited, tenant-scoped, operator-only ingestion-inventory" in text
+        assert "must never rely solely on customer-retained" in text
+
+    def test_deployment_doc_blocker_list_references_the_inventory_mechanism(
+        self, ingestion_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(ingestion_deployment_doc_text)
+        assert "No audited, tenant-scoped, operator-only ingestion-inventory" in text
+
+
+# --- Phase 4F correction pass: documentation self-consistency ---------------
+
+
+class TestPhase4FSecurityReviewDoesNotContradictItself:
+    """The review's own §0 originally said "No discrepancy was found" and
+    then, in the very next sentence, described a stale-documentation
+    discrepancy that *was* found and corrected -- a direct self-
+    contradiction. It also must never let its narrow "no open, unmitigated
+    §G finding" statement read as if it erased the separately-tracked
+    production-readiness blockers.
+    """
+
+    def test_pre_work_reconciliation_does_not_claim_zero_discrepancies_found(
+        self, phase_4f_security_review_text: str
+    ) -> None:
+        section = _extract_section(
+            phase_4f_security_review_text,
+            r"## 0\. Pre-work reconciliation",
+            r"## 1\. Threat-by-threat disposition",
+        )
+        normalized = _normalize_whitespace(section)
+        assert "No discrepancy was found" not in normalized
+        assert "One documentation-lag discrepancy was found and corrected" in normalized
+
+    def test_no_open_unmitigated_finding_is_scoped_to_reviewed_threats(
+        self, phase_4f_security_review_text: str
+    ) -> None:
+        text = _normalize_whitespace(phase_4f_security_review_text)
+        assert "No open, unmitigated finding remains against §G's application-level" in text
+        assert "must never be read as erasing or minimizing" in text
+        assert "docs/deployment/ingestion-production.md" in text
+        assert "§11" in text

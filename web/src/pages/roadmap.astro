@@ -103,11 +103,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <p>
         Phase 4B and Phase 4C added local, in-memory reference storage and real Argon2id authentication
         mechanics inside the CloudOps Guard Python package (not this website's codebase). Phase 4D then
-        implemented the four designed API endpoints on top of that foundation, was independently reviewed
-        and approved, and has since been committed and pushed to this project's own repository. Phase 4E
-        has since implemented the customer-controlled command-line uploader itself
-        (<code>cloudops-guard upload</code>), currently uncommitted and pending its own independent
-        review. Both remain strictly <strong>local/staging-only</strong>: the API exists only as code a
+        implemented the four designed API endpoints on top of that foundation, and Phase 4E implemented
+        the customer-controlled command-line uploader itself (<code>cloudops-guard upload</code>); both
+        were independently reviewed and approved, and have since been committed and pushed to this
+        project's own repository. Phase 4F, an independent security review exercising every threat named
+        in the design document against the real implementation, is now underway. Both the API and the
+        uploader remain strictly <strong>local/staging-only</strong>: the API exists only as code a
         developer can run themselves against a loopback address for testing, and the uploader only talks
         to whatever <code>--endpoint</code> that developer explicitly configures &mdash; never
         automatically, and never before an explicit, typed confirmation. There is still no

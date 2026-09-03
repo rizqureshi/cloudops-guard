@@ -891,10 +891,98 @@ regardless of which milestone is currently in progress.
   than the intended "never contacted" proof, so a second, independent
   loopback server was added as the redirect target to observe the
   contact directly, and the strengthened test was reconfirmed against
-  the same mutation before being accepted), and reverted. This work is
-  **uncommitted**, pending independent review; it does not authorize
-  Phase 4F, production storage, credentials, deployment, tagging, or a
-  release.
+  the same mutation before being accepted), and reverted. **Phase 4E, and
+  three subsequent independent correction passes, have since been
+  reviewed, approved, committed, and pushed as commit
+  `760cb03da0909fb47592e3ba18135eb60cb29d34`** ("feat: add
+  customer-controlled report uploader", 40 files, byte-for-byte
+  identical to the independently-reviewed/hash-verified manual-review
+  archive), followed by a narrow, single-file CI-restoration commit,
+  `4e1c778a3408904af534b8b420b85af193a13074` ("test: stabilize uploader
+  help assertions"). The three correction passes (in order) fixed: (1)
+  response-lifecycle exception sanitization, strict server-envelope
+  validation (including a fabricated `422`/`"invalid_report"` pairing
+  that does not exist in the real contract, closed by importing
+  `ingestion_api.errors.HTTP_STATUS_BY_CODE`, now public), endpoint-
+  parsing hardening, a `local_report.py` TOCTOU fix (a single opened
+  file descriptor for both `fstat` and the bounded read), the
+  confirmation prompt's missing trailing space, and report-content
+  leaking through error messages/`repr()` (fixed with
+  `field(repr=False)`); (2) four residual findings the first pass's own
+  fixes still had — identifier/fingerprint regexes still vulnerable to
+  `$` matching before a trailing `\n` (fixed with unanchored patterns +
+  `.fullmatch()`), a timestamp grammar looser than the real server
+  formatter's actual output shape, a second unprotected
+  `response.status` access in `transport.py`, and an IPv6 zone/scope
+  identifier (`fe80::1%eth0`) bypassing the endpoint validator's "never
+  a `%`" guarantee since `ipaddress.ip_address()` accepts one; (3) one
+  final blocker — legacy hexadecimal IPv4 notation (`0x7f.0.0.1`)
+  treated as an ordinary DNS hostname despite the real OS resolver
+  (`socket.inet_aton`/`getaddrinfo`, independently confirmed) resolving
+  it to `127.0.0.1`. All three passes were independently mutation-
+  verified; every finding was independently reproduced before being
+  fixed. The CI-restoration commit fixed one environment-sensitive test
+  (`tests/test_uploader_cli.py::TestHelp::
+  test_upload_help_documents_every_option`, passing on macOS/Python
+  3.13 but failing on CI's Ubuntu/Python 3.12 runner because color
+  output splits an option name into multiple ANSI spans, independently
+  reproduced locally via `FORCE_COLOR=1`) by replacing it with
+  `TestUploadCommandOptionMetadata` (inspecting the real Click command
+  tree via `typer.core.TyperCommand`/`TyperOption`, since the locked
+  `typer==0.27.0` vendors its own internal Click fork whose runtime
+  objects are not instances of `click.Command`/`Option`) and
+  `TestRenderedHelpText` (normalized rendered-output coverage across
+  multiple terminal widths). `HEAD == origin/main ==
+  4e1c778a3408904af534b8b420b85af193a13074`, CI green at 2404 pytest;
+  Web CI (path-filtered to `web/**`) did not re-run for the test-only
+  restoration commit but had already passed on the Phase 4E commit
+  itself (733 Vitest, 29 pages, 309 Playwright).
+- **Phase 4F — security review and threat-model validation — is now
+  underway**, uncommitted, pending independent review. Produced
+  `docs/reviews/v0.4.0-phase-4f-security-readiness.md`, exercising
+  every one of §G's 12 threats (plus the explicitly-accepted
+  bearer-token-replay residual risk) against the real implementation —
+  a real `uvicorn` loopback server for every concurrency/HTTP-level
+  guarantee, never code inspection alone — with no open, unmitigated
+  finding remaining; production numeric abuse-protection thresholds and
+  a distributed backing store for the two rate/attempt limiters are
+  explicitly deferred to Phase 4G, exactly as §F/§G themselves reserve,
+  not a Phase 4F omission. Added one new, narrowly-scoped, purely local
+  production-hardening guard,
+  `src/cloudops_guard/ingestion_api/production_readiness.py` —
+  `validate_production_config` fails closed (raises
+  `ProductionConfigError`, naming every offending field) if any
+  `IngestionApiConfig` store/limiter is still this package's own
+  in-memory reference implementation, or if `retention_period` is not a
+  genuine positive duration; no production entrypoint exists yet to
+  call it, so it is not reachable from any running system today, but is
+  the tested guard a future Phase 4G entrypoint must use — mutation-
+  verified. Added one adversarial regression test closing a previously-
+  untested (but already-correct) gap,
+  `tests/test_uploader_endpoint.py::
+  TestPrivateAndLinkLocalAddressesOverPlainHttp`, proving private/
+  link-local addresses (including the cloud-metadata-service address
+  `169.254.169.254`) are correctly rejected over plain `http://` and
+  correctly still accepted over `https://` — mutation-verified. Also
+  produced, within this phase's own broader approved scope: a
+  provider-neutral production architecture recommendation
+  (`docs/deployment/ingestion-production.md`, comparing three pilot-
+  scale hosting approaches and recommending one, explicitly labeled
+  "Recommended — pending explicit human approval" — no provider or
+  region is selected or approved by this document), a Phase 4G
+  deployment-workflow *design* (same document, §12 — manual
+  `workflow_dispatch` only, exact typed confirmation, protected
+  GitHub Environment approval, OIDC/workload identity, separate build/
+  verify/plan/approve/deploy stages, synthetic-data-only smoke tests;
+  no executable, provider-specific workflow file is added), a
+  preparatory pilot runbook using only placeholder values
+  (`docs/pilots/ingestion-pilot-runbook.md`), and a Phase 4G
+  authorization checklist naming everything that still requires
+  separate, contemporaneous human approval
+  (`docs/pilots/phase-4g-authorization-checklist.md`). **Nothing has
+  been deployed, provisioned, tagged, or released; no credential or
+  token has been issued; no GitHub Environment was created; no pilot
+  customer has been onboarded; Phase 4G has not begun.**
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate

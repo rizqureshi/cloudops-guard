@@ -417,3 +417,52 @@ class TestHexadecimalAndLegacyNumericIpv4Notation:
 
         with pytest.raises(EndpointValidationError):
             validate_endpoint("https://0x7f.0.0.1/api/v1/reports")
+
+
+class TestPrivateAndLinkLocalAddressesOverPlainHttp:
+    """**Phase 4F adversarial exercise**: "Endpoint parsing against
+    loopback, private/link-local addresses." This behavior was already
+    correctly implemented (only a syntactically-recognized loopback
+    address may use `http://` at all -- every other literal IPv4/IPv6
+    address, private, link-local, or public, requires `https://`
+    regardless of its routability), but had no dedicated regression test
+    before this pass -- independently confirmed here, including the
+    cloud-metadata-service address (`169.254.169.254`) that is a common
+    real-world SSRF target.
+    """
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "10.0.0.1",  # RFC 1918 private
+            "172.16.0.1",  # RFC 1918 private
+            "192.168.1.1",  # RFC 1918 private
+            "169.254.169.254",  # link-local -- the AWS/GCP/Azure metadata service address
+            "[fe80::1]",  # IPv6 link-local
+            "[fc00::1]",  # IPv6 unique local
+        ],
+    )
+    def test_private_or_link_local_address_over_http_is_rejected(self, host: str) -> None:
+        with pytest.raises(EndpointValidationError, match="https"):
+            validate_endpoint(f"http://{host}/api/v1/reports")
+
+    @pytest.mark.parametrize(
+        "host",
+        ["10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "[fe80::1]", "[fc00::1]"],
+    )
+    def test_the_same_private_or_link_local_address_over_https_is_accepted(self, host: str) -> None:
+        # Deliberate design: HTTPS is required everywhere except an
+        # explicit loopback address -- it is never *forbidden* to point
+        # the uploader at a private-network endpoint over HTTPS (a pilot
+        # customer's ingestion endpoint may legitimately live on a
+        # private network), only forbidden to do so over plaintext HTTP.
+        url = f"https://{host}/api/v1/reports"
+        assert validate_endpoint(url) == url
+
+    def test_loopback_remains_the_sole_http_exception(self) -> None:
+        for url in (
+            "http://localhost/api/v1/reports",
+            "http://127.0.0.1/api/v1/reports",
+            "http://[::1]/api/v1/reports",
+        ):
+            assert validate_endpoint(url) == url
