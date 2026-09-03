@@ -9,7 +9,11 @@ and a **GitLab CI/CD audit MVP**, each its own CLI subcommand and report set.
 
 ## Current scope
 
-- Two CLI commands: `cloudops-guard audit kubernetes` and `cloudops-guard audit gitlab`.
+- Three CLI commands: `cloudops-guard audit kubernetes`, `cloudops-guard audit gitlab`,
+  and `cloudops-guard upload` (Phase 4E — see
+  [Uploading a report](#uploading-a-report-cloudops-guard-upload) below). Uploading is
+  entirely customer-controlled and never automatic; no hosted ingestion service exists
+  yet.
 - **Kubernetes**: read-only collection of namespace, pod, container, deployment and
   replicaset metadata via the official Kubernetes Python client. `--namespace` runs
   entirely on namespace-scoped APIs (see [RBAC permissions](#rbac-permissions-least-privilege)).
@@ -36,6 +40,11 @@ The following are explicitly **not** implemented yet:
 - LLM integration.
 - Remediation (automatic or suggested fixes are not applied; findings only note whether
   a check *could* eventually be auto-remediated).
+- A hosted/deployed ingestion service. A versioned ingestion API and its authentication
+  layer exist as local-only, uncommitted-to-deployment code (`docs/milestones/
+  v0.4.0-ingestion-api.md`, Phases 4B–4E) that a caller can run themselves against a
+  loopback address for testing — nothing is deployed, and no real customer credential
+  has ever been issued.
 - GitLab: multi-project, group-wide, or namespace-wide scoping (one project per audit
   run); pipeline/job execution or simulation; CI/CD variables, job logs, traces, or
   artifacts.
@@ -240,6 +249,61 @@ runner-management endpoint. See `docs/milestones/v0.2.0-gitlab-audit.md` for eac
 check's full condition, evidence, and rationale, and for the detailed controlled
 acceptance-test records (GitLab.com and self-managed GitLab CE 18.4.6) behind the
 minimum-access conclusions above.
+
+## Uploading a report (`cloudops-guard upload`)
+
+**Phase 4E** adds a third, entirely separate CLI command that uploads a
+previously generated `report.json` to a versioned ingestion API
+(`docs/milestones/v0.4.0-ingestion-api.md`). This is **customer-controlled
+and never automatic**: `audit kubernetes`/`audit gitlab` never invoke it,
+never read an ingestion credential, and never perform any ingestion-network
+activity on their own. **No hosted ingestion service exists yet** — there is
+no production `--endpoint` default, and this command has nothing to talk to
+until a customer (or you, for local testing) runs one themselves.
+
+```bash
+# Validate locally and see exactly what would be sent -- no network access
+# of any kind, and no credential is read or required.
+cloudops-guard upload --report-dir ./reports/gitlab \
+  --endpoint https://ingest.example.com/api/v1/reports --dry-run
+
+# Real upload: reads the token, prints a local summary, and prompts for
+# exact confirmation before ever contacting the network.
+export CLOUDOPS_GUARD_INGESTION_TOKEN='<lookup_id>.<secret>'
+cloudops-guard upload --report-dir ./reports/gitlab \
+  --endpoint https://ingest.example.com/api/v1/reports
+# Type UPLOAD to confirm sending this report to https://ingest.example.com/api/v1/reports:
+unset CLOUDOPS_GUARD_INGESTION_TOKEN
+```
+
+- **Zero network activity before confirmation.** Everything shown before you
+  type the exact, case-sensitive word `UPLOAD` (or pass `--yes`) — platform
+  detection, report-contract validation, the RFC 8785 report fingerprint, and
+  the local summary — comes only from the local `report.json` and your
+  `--endpoint` value. No DNS resolution, connection attempt, capabilities
+  request, or authentication probe happens first. `--dry-run` never reads a
+  credential and never contacts the network at all, even if one is
+  configured.
+- **Token**: read only from the `CLOUDOPS_GUARD_INGESTION_TOKEN` environment
+  variable — there is no `--token` option, and it is never read before
+  confirmation succeeds. Sent only as `Authorization: Bearer <token>`; never
+  in the URL, request body, or CloudOps Guard's own output. The same
+  environment-exposure caveat as `CLOUDOPS_GUARD_GITLAB_TOKEN` above applies.
+- **`--report-dir`**: a directory containing exactly `report.json` (the file
+  a prior `audit kubernetes`/`audit gitlab` run wrote) — never `report.html`,
+  never a directory of multiple reports.
+- **`--endpoint`**: the exact ingestion API URL, ending in `/api/v1/reports`;
+  also settable via `CLOUDOPS_GUARD_INGESTION_URL`. Must be `https://` except
+  for an explicit loopback address (`localhost`/`127.0.0.0/8`/`::1`), for
+  local testing only.
+- **`--dry-run`** and **`--yes`** are mutually exclusive. `--yes` still runs
+  every local check first and skips only the interactive prompt — useful for
+  scripted/CI use, where a non-interactive terminal without `--yes` or
+  `--dry-run` fails closed immediately rather than hanging.
+- On success, prints only safe, non-sensitive identifiers: `ingestion_id`,
+  `request_id`, `status`, and the server-verified `report_fingerprint`
+  (checked to exactly match the value computed locally before the request
+  was sent — a mismatch is reported as a failure, never as success).
 
 ## Manual acceptance test with a local `kind` cluster
 

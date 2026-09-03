@@ -103,6 +103,39 @@ class RateLimited(IngestionStorageError):
     """
 
 
+class StrictJsonRejected(IngestionStorageError):
+    """Raised by `strict_json.strict_decode_json` for any strict-decode
+    violation (`docs/milestones/v0.4.0-ingestion-api.md` §E.0): invalid
+    UTF-8, a duplicate object-member name, a bare `NaN`/`Infinity`/
+    `-Infinity` literal, a lone/unpaired surrogate, a number outside RFC
+    8785/I-JSON's representable domain, or nesting deeper than this
+    module's own conservative ceiling. Never includes the offending
+    document content in its message. **Phase 4E**: this module moved
+    here from `cloudops_guard.ingestion_api.strict_json` so the CLI
+    uploader and the ingestion API share one authoritative
+    implementation without the uploader depending on that package's own
+    `api`-extra-only dependencies -- `cloudops_guard.ingestion_api.
+    strict_json` now re-exports `strict_decode_json` as a thin
+    compatibility shim that catches this exception and translates it to
+    that package's own `ApiError(INVALID_REQUEST)`.
+    """
+
+
+class ReportFingerprintError(IngestionStorageError):
+    """Raised by `fingerprint.compute_report_fingerprint` when `report`
+    cannot be RFC 8785 canonicalized -- a numeric value outside RFC
+    8785's representable domain that somehow reached this function
+    without `strict_json.strict_decode_json` having already rejected it,
+    or a document nested deeply enough to risk exhausting the
+    canonicalizer's own internal recursion. **Phase 4E**: this module
+    moved here from `cloudops_guard.ingestion_api.fingerprint` for the
+    same shared-implementation reason as `StrictJsonRejected` above --
+    that package's own `compute_report_fingerprint` is now a thin
+    compatibility shim translating this exception to
+    `ApiError(INVALID_REQUEST)`.
+    """
+
+
 class InvalidArgon2idHashError(IngestionStorageError):
     """Raised by `argon2_backend.require_argon2id_hash` when an encoded
     hash fails to parse as Argon2id, or parses as a different Argon2

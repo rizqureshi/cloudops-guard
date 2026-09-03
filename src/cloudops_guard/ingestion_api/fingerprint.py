@@ -1,47 +1,26 @@
-"""RFC 8785 report-fingerprint computation
-(`docs/milestones/v0.4.0-ingestion-api.md` §E.0's exact algorithm) -- a
-pure function of exactly three already-validated values, computed
-identically by a future uploader (Phase 4E) and this server, with no
-network round-trip and no coordination required between them. Never
-includes tenant ID, idempotency key, request ID, ingestion ID, or any
-timestamp -- only `platform`, `report_schema_version`, and `report`
-together.
-
-**Correction pass, item 2**: `rfc8785.dumps` itself enforces RFC 8785's
-I-JSON numeric domain (raising `FloatDomainError` for a non-finite float,
-`IntegerDomainError` for an integer outside the safe-integer bound) --
-`strict_json._validate_decoded_document` already rejects both cases
-earlier, over the entire decoded request body, so this call should never
-actually raise in ordinary operation. This function still catches
-`rfc8785.CanonicalizationError` defensively (never assuming the earlier
-layer is the only path that can reach this function, and never letting a
-`ValueError` subclass escape as an uncaught `500 internal_error` for
-input this contract's own numeric-domain rule was designed to reject) --
-kept deliberately independent from, not a replacement for, that earlier,
-more specific check.
-
-**Second correction pass, item 4**: also catches `RecursionError`
-defensively -- `rfc8785.dumps` serializes nested containers recursively
-internally, so a sufficiently deep `report` value could exhaust it. In
-the normal HTTP path this is unreachable in practice (`strict_json.
-strict_decode_json`'s own `_MAX_NESTING_DEPTH` ceiling always runs first
-and rejects anything deep enough to matter, long before this function is
-reached), but this function is also `compute_report_fingerprint`'s public
-contract -- callable directly, on an arbitrary Python dict that never
-passed through `strict_decode_json` at all (e.g. a future Phase 4E
-uploader computing this same fingerprint locally from its own parsed
-report file). This is the "direct fingerprint backstop":
-`RecursionError` is mapped to the same sanitized `ApiError` as
-`CanonicalizationError`, never left to escape uncaught, regardless of how
-a caller reached this function.
+"""Compatibility re-export (**Phase 4E**): the authoritative fingerprint
+implementation now lives in `cloudops_guard.ingestion.fingerprint`,
+relocated for the same reason as `cloudops_guard.ingestion_api.
+strict_json` (see that module's own docstring) -- so the CLI uploader and
+this HTTP API share one implementation without the uploader depending on
+this package's own `api`-extra-only dependencies. `rfc8785` itself moved
+from the `api` optional-dependency group into the base runtime
+dependencies as part of this relocation. This module keeps the
+`cloudops_guard.ingestion_api.fingerprint` import path and
+`compute_report_fingerprint` signature working unchanged for existing
+code and tests, translating the neutral `errors.ReportFingerprintError`
+into this package's own `ApiError(INVALID_REQUEST)` HTTP-boundary
+contract -- identical observable behavior to before this move.
 """
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
-import rfc8785
+from cloudops_guard.ingestion.errors import ReportFingerprintError
+from cloudops_guard.ingestion.fingerprint import (
+    compute_report_fingerprint as _compute_report_fingerprint,
+)
 
 from .errors import INVALID_REQUEST, ApiError
 
@@ -49,34 +28,11 @@ from .errors import INVALID_REQUEST, ApiError
 def compute_report_fingerprint(
     platform: str, report_schema_version: int | float, report: dict[str, Any]
 ) -> str:
-    """§E.0's exact algorithm: (1) construct
-    `{"platform", "report_schema_version", "report"}` using the values
-    exactly as given -- `report` is the parsed value as received, before
-    any server-side normalization such as summary recomputation; (2)
-    serialize with RFC 8785 JCS; (3) SHA-256 the canonical bytes; (4)
-    `"sha256:" + <lowercase hex digest>`. `report_schema_version` may be
-    `int` or an integer-valued `float` (e.g. `1.0`) -- RFC 8785
-    canonicalizes both identically, so this never needs to special-case
-    which one it was given.
-
-    Raises `ApiError(INVALID_REQUEST)` -- never lets a `rfc8785.
-    CanonicalizationError`, a `RecursionError` (second correction pass,
-    item 4), or any other exception escape as an uncaught `500` -- if
-    `report` still somehow contains a numeric value outside RFC 8785's
-    representable domain, or is nested deeply enough to risk exhausting
-    the canonicalizer's own internal recursion.
+    """See `cloudops_guard.ingestion.fingerprint.compute_report_fingerprint`
+    for the full contract. Raises `ApiError(INVALID_REQUEST)` -- never a
+    raw `errors.ReportFingerprintError` or any other exception type.
     """
     try:
-        canonical_bytes = rfc8785.dumps(
-            {
-                "platform": platform,
-                "report_schema_version": report_schema_version,
-                "report": report,
-            }
-        )
-    except rfc8785.CanonicalizationError as exc:
+        return _compute_report_fingerprint(platform, report_schema_version, report)
+    except ReportFingerprintError as exc:
         raise ApiError(INVALID_REQUEST) from exc
-    except RecursionError as exc:
-        raise ApiError(INVALID_REQUEST) from exc
-    digest = hashlib.sha256(canonical_bytes).hexdigest()
-    return f"sha256:{digest}"

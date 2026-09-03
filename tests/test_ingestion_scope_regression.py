@@ -116,9 +116,13 @@ class TestNoForbiddenImports:
     def test_only_stdlib_and_approved_third_party_packages_are_imported(self) -> None:
         # A tighter, allowlist-based companion to the denylist check
         # above: every third-party import in this package must be one of
-        # exactly two approved packages -- `pydantic` (Phase 4B) and
-        # `argon2` (Phase 4C, argon2-cffi).
-        allowed_third_party = {"pydantic", "argon2"}
+        # the approved packages -- `pydantic` (Phase 4B), `argon2`
+        # (Phase 4C, argon2-cffi), and `rfc8785` (Phase 4E: the
+        # relocated, authoritative fingerprint implementation moved into
+        # this package -- see `fingerprint.py`'s own docstring -- so the
+        # base CLI's `upload` command can compute it without the `api`
+        # optional-dependency group).
+        allowed_third_party = {"pydantic", "argon2", "rfc8785"}
         stdlib_prefixes = (
             "__future__",
             "abc",
@@ -126,6 +130,9 @@ class TestNoForbiddenImports:
             "dataclasses",
             "datetime",
             "enum",
+            "hashlib",
+            "json",
+            "math",
             "re",
             "secrets",
             "threading",
@@ -155,6 +162,20 @@ class TestArgon2ImportIsConfinedToOneFile:
             if any(module == "argon2" or module.startswith("argon2.") for module in imports):
                 importing_files.append(path.name)
         assert importing_files == ["argon2_backend.py"]
+
+
+class TestRfc8785ImportIsConfinedToOneFile:
+    def test_only_fingerprint_imports_rfc8785(self) -> None:
+        # Phase 4E: mirrors TestArgon2ImportIsConfinedToOneFile above --
+        # the relocated fingerprint implementation is the one, sole
+        # module in this package that imports rfc8785.
+        importing_files = []
+        for path in _iter_ingestion_source_files():
+            tree = ast.parse(path.read_text(), filename=str(path))
+            imports = _collect_imports(tree)
+            if any(module == "rfc8785" or module.startswith("rfc8785.") for module in imports):
+                importing_files.append(path.name)
+        assert importing_files == ["fingerprint.py"]
 
 
 class TestNoNetworkOrServerBehavior:

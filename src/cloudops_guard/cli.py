@@ -34,6 +34,8 @@ from cloudops_guard.config import load_config
 from cloudops_guard.engine.evaluator import evaluate, evaluate_gitlab
 from cloudops_guard.models import AuditReport, GitLabAuditReport
 from cloudops_guard.reports.generator import generate_gitlab_reports, generate_reports
+from cloudops_guard.uploader.errors import UploaderError
+from cloudops_guard.uploader.service import run_upload
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("cloudops_guard")
@@ -190,6 +192,79 @@ def audit_gitlab(
         raise typer.Exit(code=1) from None
 
     _print_gitlab_summary(report, json_path, html_path)
+
+
+@app.command("upload")
+def upload(
+    report_dir: Path = typer.Option(
+        ...,
+        "--report-dir",
+        help="Directory containing a previously generated report.json.",
+    ),
+    endpoint: str = typer.Option(
+        ...,
+        "--endpoint",
+        envvar="CLOUDOPS_GUARD_INGESTION_URL",
+        help=(
+            "Ingestion API upload URL, ending in /api/v1/reports. No production default is "
+            "provided -- no hosted ingestion service has been deployed."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=(
+            "Validate the report locally, compute its fingerprint, and print the summary -- "
+            "never contact the network and never require a credential."
+        ),
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help=(
+            "Skip the interactive UPLOAD confirmation prompt. Every local validation, "
+            "fingerprint, and size check still runs first, exactly as in interactive mode."
+        ),
+    ),
+) -> None:
+    """Upload a previously generated report.json to the Phase 4D ingestion API.
+
+    This is never automatic. It requires either an exact, case-sensitive
+    "UPLOAD" typed at an interactive confirmation prompt, or --yes.
+    Before that confirmation (or when --dry-run is given), this command
+    performs zero network activity of any kind: no DNS resolution, no
+    connection attempt, no capabilities request, no authentication probe.
+    The ingestion token is read only from CLOUDOPS_GUARD_INGESTION_TOKEN
+    -- never a CLI option -- and only after confirmation succeeds.
+    """
+    if dry_run and yes:
+        typer.secho("--dry-run and --yes are mutually exclusive.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        result = run_upload(
+            report_dir=report_dir,
+            endpoint_raw=endpoint,
+            dry_run=dry_run,
+            yes=yes,
+            print_fn=typer.echo,
+        )
+    except UploaderError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from None
+
+    if result.dry_run:
+        typer.echo("Dry run complete -- no network request was made.")
+        return
+
+    outcome = result.outcome
+    assert outcome is not None  # only None for a dry run, handled above
+    typer.echo()
+    typer.secho("Upload complete.", fg=typer.colors.GREEN)
+    typer.echo(f"  ingestion_id: {outcome.ingestion_id}")
+    typer.echo(f"  request_id:   {outcome.request_id}")
+    typer.echo(f"  status:       {outcome.status}")
+    typer.echo(f"  fingerprint:  {outcome.report_fingerprint}")
 
 
 def _format_validation_error(exc: ValidationError) -> str:

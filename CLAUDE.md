@@ -808,9 +808,93 @@ regardless of which milestone is currently in progress.
   pytest suite grew from 2023 to 2041 (all passing); the real-loopback
   concurrency suites were re-run and remained green. No new dependency
   was added; no production deployment, credential, or infrastructure was
-  touched. This third correction pass is also **uncommitted**, pending
-  independent review; it does not authorize Phase 4E, production
-  storage, credentials, deployment, tagging, or a release.
+  touched. **All of Phase 4D — the original implementation and all three
+  correction passes above — was independently reviewed and approved,
+  then committed and pushed to `main`**: commit
+  `b35caf4b246c753a7ed8b62d4427468f312ba949` (`feat: add versioned
+  ingestion API`, 52 files). A separate, narrow CI-restoration pass then
+  fixed two pre-existing CI gaps this commit's own first push exposed —
+  `.github/workflows/ci.yml` never installed the `api` optional-
+  dependency group (so the 13 `ingestion_api`-dependent pytest modules
+  failed at collection, `ModuleNotFoundError`), and Web CI's `npm audit`
+  gate had newly started failing on an unrelated high-severity advisory
+  against a transitive dependency, `fast-uri` (four GHSA IDs, all fixed
+  at `3.1.6`; resolved with a plain `npm audit fix` bumping it to
+  `3.1.7`, entirely within `ajv@8.20.0`'s own already-declared `^3.0.1`
+  range — no override needed, `package.json` untouched) — committed as
+  `d85879051c8b61c3f022195dc5513663df19acce` (`ci: restore full workflow
+  coverage`). Both `CI` and `Web CI` passed on that commit: 2041 pytest,
+  733 Vitest across 41 files, a 29-page production build, and 309
+  Playwright tests (Chromium/Firefox/WebKit), with `npm audit` reporting
+  zero vulnerabilities. `HEAD == origin/main` at
+  `d85879051c8b61c3f022195dc5513663df19acce`. **Phase 4E — the
+  customer-controlled CLI uploader — has since been implemented,
+  uncommitted, pending independent review.** Adds
+  `cloudops-guard upload --report-dir <dir> --endpoint <url>`: loads and
+  validates a local `report.json` (reusing, never duplicating, the
+  existing Phase 4D report-contract validation and size ceilings),
+  computes its RFC 8785/SHA-256 fingerprint, prints a local-only summary
+  (platform, endpoint, finding counts, file size, fingerprint — never
+  report content, evidence, or a credential), and requires either an
+  exact, case-sensitive `UPLOAD` typed at an interactive prompt or an
+  explicit `--yes` before ever reading `CLOUDOPS_GUARD_INGESTION_TOKEN`
+  or performing any network activity; `--dry-run` performs every local
+  check and prints the same summary but never reads a credential and
+  never contacts the network at all. Existing `audit kubernetes`/
+  `audit gitlab` commands are unchanged and never import or invoke the
+  uploader transport path. **Dependency-boundary correction (pre-
+  authorized)**: the RFC 8785/strict-JSON fingerprint implementation
+  moved from `cloudops_guard.ingestion_api` (gated behind the `api`
+  optional-dependency group) into the dependency-free
+  `cloudops_guard.ingestion` package (`fingerprint.py`/`strict_json.py`,
+  raising new neutral `errors.ReportFingerprintError`/
+  `errors.StrictJsonRejected` exceptions), with `rfc8785` itself moved
+  from the `api` extra into the base runtime dependencies;
+  `cloudops_guard.ingestion_api.fingerprint`/`strict_json` are now thin
+  compatibility shims over the relocated modules, translating the
+  neutral exceptions into that package's own `ApiError(INVALID_REQUEST)`
+  — preserving every existing import path and observable behavior
+  unchanged (confirmed: all pre-existing `ingestion_api` fingerprint/
+  strict-JSON tests pass with zero modification). A real, fresh-
+  subprocess import-time audit
+  (`tests/test_uploader_dependency_boundary.py`) proves importing
+  `cloudops_guard.cli` and every uploader module pulls in none of
+  `starlette`/`uvicorn`/`httpx`/`anyio` — installing the base CLI never
+  requires the `api` extra to upload. The CLI's own HTTP transport is
+  `urllib3`-backed (already a base dependency): TLS verification always
+  required, zero automatic retries, redirects never followed (a 3xx
+  response is treated as an error, proven against a real second
+  loopback server that a reintroduced "follow redirects" mutation was
+  shown to actually contact), and bounded connect/read timeouts and
+  response-body size. 148 new tests were added (2189 total pytest, up
+  from 2041 — 147 across 10 new uploader test files, plus one new
+  rfc8785-import-confinement test in the pre-existing `cloudops_guard.
+  ingestion` scope-regression suite), covering CLI behavior, zero-network
+  guarantees (both an injected forbidden-transport fake and a real
+  `socket.socket.connect`/`socket.getaddrinfo` poison, independently
+  confirmed non-vacuous),
+  credential handling (a well-formed sentinel token proven confined to
+  the `Authorization` header alone, scanned across captured output,
+  serialized bodies, and every raised exception's message/`repr`),
+  fingerprint parity against every case in the shared, versioned
+  `tests/fixtures/ingestion_fingerprint_fixtures_v1.json` fixture (both
+  directly and through the uploader's own on-disk loading path),
+  response/transport handling (every documented HTTP status, a real
+  loopback-server redirect-rejection proof, bounded/malformed responses,
+  and fingerprint-mismatch detection), and regression isolation (an
+  `ast`-based import-graph check plus behavioral spies proving
+  `audit kubernetes`/`audit gitlab` never call `run_upload` or read the
+  ingestion token, even when the audit itself fails). All 8 of the
+  task's own named high-risk mutations were independently performed,
+  observed to fail the intended tests (one — redirect-following — was
+  first caught only incidentally via a connection-timeout message rather
+  than the intended "never contacted" proof, so a second, independent
+  loopback server was added as the redirect target to observe the
+  contact directly, and the strengthened test was reconfirmed against
+  the same mutation before being accepted), and reverted. This work is
+  **uncommitted**, pending independent review; it does not authorize
+  Phase 4F, production storage, credentials, deployment, tagging, or a
+  release.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate

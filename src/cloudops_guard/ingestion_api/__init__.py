@@ -31,12 +31,6 @@ CLI's dependency set):
   and shuts it down deterministically, never a public interface.
 - `httpx` -- an async-capable HTTP client, used only by test code to
   drive real concurrent requests against the loopback server above.
-- `rfc8785` -- a maintained, standalone implementation of RFC 8785 JSON
-  Canonicalization Scheme, required for the deterministic
-  `report_fingerprint` algorithm (§E.0) exactly as specified -- writing
-  and maintaining a bespoke JCS implementation in-repo was judged riskier
-  than depending on a small, focused, spec-conformant library whose only
-  job is this one algorithm.
 - `anyio` -- already an existing *transitive* dependency of `starlette`
   and `httpx`; made an explicit direct dependency because `app.py`
   (Phase 4D correction pass, item 5) imports `anyio.to_thread` directly,
@@ -52,6 +46,15 @@ CLI's dependency set):
 
 No database, object store, secret manager, or cloud SDK is imported
 anywhere in this package.
+
+**Phase 4E**: `rfc8785` moved out of this `api` optional-dependency group
+into the base `cloudops-guard` CLI's own runtime dependencies, alongside
+the authoritative fingerprint/strict-JSON implementations themselves
+(relocated to `cloudops_guard.ingestion.fingerprint`/`cloudops_guard.
+ingestion.strict_json`) -- the new `upload` CLI command needs both
+without requiring this `api` group. `fingerprint.py`/`strict_json.py` in
+this package are now thin compatibility shims over those relocated
+modules; see their own docstrings.
 """
 
 from __future__ import annotations

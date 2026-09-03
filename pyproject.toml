@@ -16,6 +16,13 @@ dependencies = [
     # failures (connection/DNS/TLS) separately from Kubernetes API errors.
     "urllib3>=2.0.0",
     "argon2-cffi>=25.1.0",
+    # Phase 4E: moved from the `api` optional-dependency group into the
+    # base runtime dependencies. `cloudops_guard.ingestion.fingerprint`
+    # (the relocated, authoritative RFC 8785 fingerprint implementation
+    # -- see that module and `ingestion_api/fingerprint.py`'s own
+    # compatibility-shim docstring) is now imported by the base CLI's
+    # `upload` command, not only by the local/staging-only ingestion API.
+    "rfc8785>=0.1.4",
 ]
 
 [project.scripts]
@@ -34,7 +41,8 @@ api = [
     "starlette>=0.47.0",
     "uvicorn>=0.34.0",
     "httpx>=0.28.0",
-    "rfc8785>=0.1.4",
+    # rfc8785 moved to the base `dependencies` list above (Phase 4E) --
+    # no longer declared here.
     # Already an existing transitive dependency of starlette/httpx; made
     # explicit because Phase 4D's correction pass (item 5) now imports it
     # directly, to move blocking Argon2id/report-validation/store work

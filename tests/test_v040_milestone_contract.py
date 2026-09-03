@@ -1123,46 +1123,57 @@ class TestPhase4BDocumentationMatchesRealCode:
         assert "Phase 4B has implemented" in milestone_bullet
         assert "uncommitted" in milestone_bullet.lower()
 
-    def test_milestone_doc_states_phase_4b_and_4c_are_committed_and_phase_4d_is_uncommitted(
+    def test_milestone_doc_states_phase_4b_4c_4d_are_committed_and_phase_4e_is_uncommitted(
         self, milestone_text: str
     ) -> None:
-        # Phase 4C was originally uncommitted when this test was first
-        # written; it has since been committed and pushed (commit
-        # `90e2a8848b2df6fd3befeb83c737b06166866bc1`) -- this assertion is
-        # updated to match that true, positive progression, mirroring how
-        # Phase 4B's own "uncommitted" -> "committed and pushed" wording
-        # was already expected to change once it, too, was committed.
+        # Phase 4D was originally uncommitted when this test was first
+        # written; it has since been reviewed, approved, committed, and
+        # pushed (commit `b35caf4b246c753a7ed8b62d4427468f312ba949`,
+        # plus the `d85879051c8b61c3f022195dc5513663df19acce`
+        # CI-restoration follow-up) -- this assertion is updated to match
+        # that true, positive progression, mirroring how Phase 4B's and
+        # Phase 4C's own "uncommitted" -> "committed and pushed" wording
+        # was already expected to change once each, in turn, was
+        # committed. Phase 4E (the CLI uploader) is now the
+        # correspondingly uncommitted phase.
         assert "Phase 4B (committed and pushed, commit" in milestone_text
         assert "Phase 4C (committed and pushed, commit" in milestone_text
-        assert "Phase 4D (uncommitted, pending independent review) has since" in milestone_text
+        assert "Phase 4D (committed and pushed, commit" in milestone_text
+        assert "Phase 4E" in milestone_text
+        assert "uncommitted, pending independent review" in milestone_text
 
-    def test_only_phase_4b_4c_and_4d_are_marked_implemented_in_the_phase_plan(
+    def test_only_phase_4b_4c_4d_and_4e_are_marked_implemented_in_the_phase_plan(
         self, milestone_text: str
     ) -> None:
-        # Guards against a careless future edit marking a later phase (4E+)
-        # implemented before it actually is: exactly three "Status:
+        # Guards against a careless future edit marking a later phase (4F+)
+        # implemented before it actually is: exactly four "Status:
         # implemented" markers may exist in the phase-plan section, and
-        # they must belong to Phase 4B, Phase 4C, and Phase 4D
-        # specifically, in order.
+        # they must belong to Phase 4B, Phase 4C, Phase 4D, and Phase 4E
+        # specifically, in order -- updated from three to four now that
+        # Phase 4E (uploader) has itself been implemented (uncommitted,
+        # pending independent review; the marker text itself says so).
         phase_plan_section = _extract_section(
             milestone_text, r"## I\. Phase plan \(Phase 4B through 4G, proposed\)", r"$"
         )
         markers = [m.start() for m in re.finditer(r"Status: implemented", phase_plan_section)]
-        assert len(markers) == 3, (
-            f"expected exactly three phases marked implemented in the phase plan, "
+        assert len(markers) == 4, (
+            f"expected exactly four phases marked implemented in the phase plan, "
             f"found {len(markers)}"
         )
         phase_4b_heading = phase_plan_section.find("Phase 4B — Storage and token interfaces")
         phase_4c_heading = phase_plan_section.find("Phase 4C — Authentication implementation")
         phase_4d_heading = phase_plan_section.find("Phase 4D —")
         phase_4e_heading = phase_plan_section.find("Phase 4E —")
+        phase_4f_heading = phase_plan_section.find("Phase 4F —")
         assert phase_4b_heading != -1
         assert phase_4c_heading != -1
         assert phase_4d_heading != -1
         assert phase_4e_heading != -1
+        assert phase_4f_heading != -1
         assert phase_4b_heading < markers[0] < phase_4c_heading
         assert phase_4c_heading < markers[1] < phase_4d_heading
         assert phase_4d_heading < markers[2] < phase_4e_heading
+        assert phase_4e_heading < markers[3] < phase_4f_heading
 
     def test_readme_and_roadmap_mention_phase_4b(self, roadmap_text: str) -> None:
         readme_text = _read(README_MD)

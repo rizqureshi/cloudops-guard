@@ -91,24 +91,28 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
   <section class="section" aria-labelledby="in-design-heading">
     <div class="container container--narrow">
-      <h2 id="in-design-heading">Specified, not implemented</h2>
+      <h2 id="in-design-heading">Specified and built locally, still not deployed</h2>
       <p>
-        A versioned report-ingestion API and an explicit, customer-controlled command-line uploader are
-        specified in a published design document (v0.4.0, Phase 4A). <strong
-          >This phase is documentation and contract design only</strong
-        > &mdash; no API, storage, authentication, or uploader code exists, nothing is deployed, and this
-        website does not and will not itself upload a report; the design is a separate service, entirely
-        outside this site. See <a href="/privacy">Privacy</a> for how this website's own no-upload
-        behavior is unaffected.
+        A versioned report-ingestion API and an explicit, customer-controlled command-line uploader were
+        first specified in a published design document (v0.4.0, Phase 4A), which was
+        <strong>documentation and contract design only</strong> &mdash; no API, storage, authentication, or
+        uploader code existed yet, and this website does not and will not itself upload a report; the
+        design is a separate service, entirely outside this site. See <a href="/privacy">Privacy</a> for
+        how this website's own no-upload behavior is unaffected.
       </p>
       <p>
-        Phase 4B and Phase 4C have since added local, in-memory reference storage and real Argon2id
-        authentication mechanics inside the CloudOps Guard Python package (not this website's codebase),
-        and a later, uncommitted, pending-review Phase 4D has implemented the four designed API endpoints
-        on top of that foundation &mdash; but strictly as a <strong>local/staging-only</strong> service:
-        it exists only as code a developer can run themselves against a loopback address for testing
-        &mdash; no network-reachable or customer-reachable server, no deployment of any kind, no real
-        customer credential, and no uploader CLI exist. That work has no bearing on this site or its own
+        Phase 4B and Phase 4C added local, in-memory reference storage and real Argon2id authentication
+        mechanics inside the CloudOps Guard Python package (not this website's codebase). Phase 4D then
+        implemented the four designed API endpoints on top of that foundation, was independently reviewed
+        and approved, and has since been committed and pushed to this project's own repository. Phase 4E
+        has since implemented the customer-controlled command-line uploader itself
+        (<code>cloudops-guard upload</code>), currently uncommitted and pending its own independent
+        review. Both remain strictly <strong>local/staging-only</strong>: the API exists only as code a
+        developer can run themselves against a loopback address for testing, and the uploader only talks
+        to whatever <code>--endpoint</code> that developer explicitly configures &mdash; never
+        automatically, and never before an explicit, typed confirmation. There is still no
+        network-reachable or customer-reachable server, no deployment of any kind, and no real customer
+        credential has ever been issued. None of this work has any bearing on this site or its own
         no-upload behavior.
       </p>
     </div>

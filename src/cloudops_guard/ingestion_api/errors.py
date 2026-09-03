@@ -24,7 +24,18 @@ PAYLOAD_TOO_LARGE: Final[str] = "payload_too_large"
 RATE_LIMITED: Final[str] = "rate_limited"
 INTERNAL_ERROR: Final[str] = "internal_error"
 
-_HTTP_STATUS_BY_CODE: Final[dict[str, int]] = {
+#: **Public** (Phase 4E correction pass): the single authoritative
+#: error-code -> HTTP-status mapping this contract defines. Deliberately
+#: exported (no longer a leading-underscore private name) so
+#: `cloudops_guard.uploader.response` can validate a server's returned
+#: `(status, error)` pair against this exact table -- rather than
+#: re-typing a second, independently-maintained copy that could silently
+#: drift from the real one, or worse, inventing plausible-looking values
+#: (a 422 status/`"invalid_report"` code combination was reproduced as
+#: exactly this kind of drift before this correction: `invalid_report`
+#: is actually `400` here, and `422` is not a status this contract
+#: defines at all).
+HTTP_STATUS_BY_CODE: Final[dict[str, int]] = {
     INVALID_REQUEST: 400,
     INVALID_REPORT: 400,
     UNSUPPORTED_REPORT_SCHEMA_VERSION: 400,
@@ -52,9 +63,9 @@ class ApiError(Exception):
     """
 
     def __init__(self, code: str, *, allow: str | None = None) -> None:
-        if code not in _HTTP_STATUS_BY_CODE:
+        if code not in HTTP_STATUS_BY_CODE:
             raise ValueError(f"unknown error code: {code!r}")
         super().__init__(code)
         self.code = code
-        self.http_status = _HTTP_STATUS_BY_CODE[code]
+        self.http_status = HTTP_STATUS_BY_CODE[code]
         self.allow = allow

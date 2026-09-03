@@ -397,6 +397,7 @@ dependencies = [
     { name = "kubernetes" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "rfc8785" },
     { name = "typer" },
     { name = "urllib3" },
 ]
@@ -405,7 +406,6 @@ dependencies = [
 api = [
     { name = "anyio" },
     { name = "httpx" },
-    { name = "rfc8785" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -424,7 +424,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "rfc8785", marker = "extra == 'api'", specifier = ">=0.1.4" },
+    { name = "rfc8785", specifier = ">=0.1.4" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5.0" },
     { name = "starlette", marker = "extra == 'api'", specifier = ">=0.47.0" },
     { name = "typer", specifier = ">=0.12.0" },
