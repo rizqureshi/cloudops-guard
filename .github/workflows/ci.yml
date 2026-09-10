@@ -20,7 +20,19 @@ jobs:
         run: uv python install 3.12
 
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra api
+        # CI-restoration pass: `tests/ingestion_azure/conftest.py` imports
+        # `psycopg` (the `azure-production` extra) unconditionally at
+        # collection time, so normal CI must install it too, alongside the
+        # pre-existing `dev`/`api` extras -- reproduced directly: a clean
+        # `uv sync --locked --extra dev --extra api` venv (the prior
+        # command) left `psycopg` uninstalled, and both `python3 -c
+        # "import psycopg"` and collecting `tests/ingestion_azure` failed
+        # with the exact `ModuleNotFoundError` GitHub Actions run
+        # 34521414314 hit. This does not move any Azure dependency into
+        # the base or `api` groups, and does not enable the separate,
+        # fail-loud `COG_AZURE_TESTS_REQUIRED=1` gate -- that remains the
+        # manual deployment-validation workflow's own responsibility.
+        run: uv sync --locked --extra dev --extra api --extra azure-production
 
       - name: Run tests
         run: uv run pytest
