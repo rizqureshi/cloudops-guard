@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from cloudops_guard.ingestion.interfaces import (
     AttemptLimiter,
@@ -22,6 +23,9 @@ from cloudops_guard.ingestion.interfaces import (
     RequestRateLimiter,
     TokenStore,
 )
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 from .ids import generate_ingestion_id, generate_request_id
 
@@ -61,3 +65,19 @@ class IngestionApiConfig:
     request_id_generator: Callable[[], str] = generate_request_id
     ingestion_id_generator: Callable[[], str] = generate_ingestion_id
     retention_period: dt.timedelta = field(default=DEFAULT_RETENTION_PERIOD)
+
+    #: **Phase 4G-A**: an optional override for `app._peer_source_identifier`'s
+    #: default behavior (the raw ASGI `scope["client"]` peer address) --
+    #: `None` (the default) preserves that exact existing behavior
+    #: unchanged, which is what every Phase 4D/4F test, and any deployment
+    #: without a trusted reverse proxy in front of it, continues to use.
+    #: A production entrypoint deployed behind a specific, documented
+    #: proxy topology (e.g. Azure Container Apps' own ingress --
+    #: `cloudops_guard.ingestion_azure.source_identifier.
+    #: resolve_azure_container_apps_client_address`) sets this instead,
+    #: so Layer 2/2.5's abuse-protection source key is derived from the
+    #: real client address that topology's own documentation establishes
+    #: as trustworthy, never from the proxy's own peer address (which
+    #: would otherwise collapse every real caller into one shared scope
+    #: key -- Phase 4F's own recorded, open blocker this field closes).
+    source_identifier_resolver: Callable[[Request], str] | None = None

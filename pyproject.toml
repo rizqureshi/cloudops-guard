@@ -50,6 +50,39 @@ api = [
     # (`anyio.to_thread.run_sync`) -- see `app.py`.
     "anyio>=4.0.0",
 ]
+# Phase 4G-A: the Azure production adapters (`src/cloudops_guard/
+# ingestion_azure/`) are an optional, separate extra from `api` above --
+# installing the local/staging `api` extra (or the base CLI) never pulls
+# in a database driver or a cloud SDK. See `src/cloudops_guard/
+# ingestion_azure/__init__.py` for the justification of each dependency
+# below. No Azure resource is created, and no credential is read, by
+# installing this extra -- it only makes the adapter *code* importable.
+azure-production = [
+    # A maintained, actively-developed PostgreSQL driver with a built-in,
+    # synchronous connection pool (`psycopg_pool`) -- deliberately no ORM
+    # (CLAUDE.md: "avoid unnecessary dependencies... justify any
+    # addition"; the storage layer's interfaces, `cloudops_guard.
+    # ingestion.interfaces`, are already a thin, explicit contract with no
+    # need for a query builder or model-mapping layer on top of it). The
+    # synchronous API is used deliberately: every `MetadataStore`/
+    # `TokenStore`/`AttemptLimiter`/`RequestRateLimiter` method in this
+    # codebase is already a plain synchronous call, invoked from
+    # `app.py`'s existing `anyio.to_thread.run_sync` worker-thread
+    # offload -- there is no event loop inside these adapters themselves
+    # to justify an async driver.
+    "psycopg[binary,pool]>=3.2.0",
+    # The official Azure Blob Storage SDK -- `ReportBlobStore`'s
+    # conditional-create (`put_if_absent`) requires Azure's own
+    # If-None-Match precondition primitive, which this library exposes
+    # directly; hand-rolling raw REST calls against Azure Storage's
+    # control plane would be substantially riskier than using Microsoft's
+    # own maintained client.
+    "azure-storage-blob>=12.24.0",
+    # `DefaultAzureCredential` -- managed-identity authentication to Blob
+    # Storage. Never a storage-account key embedded in code or an image
+    # (task 4's explicit requirement).
+    "azure-identity>=1.19.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -74,3 +107,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "postgres: requires a real, reachable PostgreSQL instance (Phase 4G-A) -- see tests/ingestion_azure/conftest.py. Skipped when COG_TEST_POSTGRES_CONNINFO is unset, EXCEPT when COG_AZURE_TESTS_REQUIRED=1 (the dedicated Azure-adapters CI job), where an unreachable database fails loudly instead.",
+    "azurite: requires a real, reachable Azurite (Azure Storage emulator) instance (Phase 4G-A) -- see tests/ingestion_azure/conftest.py. Same skip/fail-loud rule as the postgres marker above.",
+]

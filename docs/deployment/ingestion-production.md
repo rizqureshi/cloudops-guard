@@ -240,23 +240,27 @@ correctness from a managed product" is the safer default than
 latency is a genuine (if minor) UX concern for an interactive CLI
 confirmation flow that Option A avoids entirely.
 
-**This recommendation names an architecture pattern, not a specific
-cloud provider or region.** No provider or region has been selected —
-see §8 below for what remains an open, mandatory-before-Phase-4G
-decision.
+**Update — the provider/region decision has since been recorded**: the
+user has selected **Microsoft Azure, Canada Central (`canadacentral`)**
+(recorded 2026-09-09, `docs/pilots/phase-4g-authorization-checklist.md`,
+`docs/deployment/azure-ingestion-production.md` §0). This recommendation
+itself still names only an architecture *pattern* — it was never the
+document that made the provider/region decision, and it is preserved
+below unchanged as the pattern-level rationale that decision was made
+against. See `docs/deployment/azure-ingestion-production.md` for the
+concrete, Azure-specific architecture, cost estimate, and implementation
+Phase 4G-A produced.
 
 **Cost figures in §2 above are qualitative comparisons ("low-to-
 moderate," "lowest," "highest"), not a numerical cost estimate — and
 must never be read as one.** No actual pricing was looked up against
-any specific provider's current rate card. Once a provider and region
-are selected (§8), a **current, provider-specific numerical cost
-estimate, priced against that provider's actual published rates for
-the pilot's expected traffic volume, is a separate, mandatory step —
-required, reviewed, and explicitly budget-approved by the user, after
-provider/region selection and before any resource is provisioned.**
-This is listed as its own item in `docs/pilots/
-phase-4g-authorization-checklist.md`, distinct from selecting the
-provider/region itself.
+any specific provider's current rate card when this section was
+originally written. **A current, provider-specific numerical cost
+estimate now exists** — `docs/deployment/azure-ingestion-production.md`
+§5, priced against Azure's own published Canada Central rates, together
+with the approved CAD $100/month before-tax alerting ceiling — reviewed
+and recorded per `docs/pilots/phase-4g-authorization-checklist.md`'s own
+precondition item, distinct from selecting the provider/region itself.
 
 **Managed-service availability claims in §2 above (e.g. "a Canadian
 region," "a managed relational database," "a managed in-memory data
@@ -359,33 +363,31 @@ document, or any Phase 4F deliverable.** No secret has been created.
 
 ## 8. Region, retention, and backup design
 
-- **Explicit region for every service, store, and backup — a mandatory
-  precondition to *authorizing* Phase 4G, not an activity performed
-  during it, and not decided here** (per §H: "Region/data-residency
-  selection is a mandatory decision before Phase 4G... not a default a
-  vendor happens to pick"). The user must select and record the
-  provider and region *before* Phase 4G may begin (§3 above,
-  `docs/pilots/phase-4g-authorization-checklist.md`); Phase 4G then
-  provisions against that already-recorded decision, never selecting it
-  itself. Every component in §4's diagram (application tier, metadata
-  DB, object storage, token DB, limiter store, and backups of each)
-  must be pinned to the **same** explicitly-chosen Canadian region —
-  never left to a provider's own default, and never split across
-  regions without an explicit, separately-justified reason.
+- **Explicit region for every service, store, and backup — recorded**:
+  Microsoft Azure, Canada Central (`canadacentral`), recorded 2026-09-09
+  (`docs/pilots/phase-4g-authorization-checklist.md`). Phase 4G-A's own
+  infrastructure-as-code (`infra/azure/`) hard-codes every data-bearing
+  resource to this exact region — never a provider default, never split
+  across regions — and this is structurally verified, not merely
+  documented (`tests/ingestion_azure/test_bicep_infrastructure.py::
+  TestRegionConstraint`). See `docs/deployment/
+  azure-ingestion-production.md` for the concrete implementation.
 - **Retention**: matches §C's proposed default (90 days from ingestion,
   automatic retirement, configurable per pilot agreement) —
   `IngestionApiConfig.retention_period`, already a constructor
   parameter today (`DEFAULT_RETENTION_PERIOD = dt.timedelta(days=90)`),
   requires no code change to honor a different pilot-specific value.
-- **Backup-deletion design**: whatever managed backup product the
-  chosen provider offers must be configured with a **bounded rotation
-  window** tied to its own rotation period (§H/§E.4) — a backup
-  containing data whose deletion has been requested must itself be
-  rotated out within that bounded window; "we have a backup" must never
-  be treated as license to retain deleted data indefinitely. The exact
-  rotation window is a Phase 4G configuration decision, to be recorded
-  explicitly once a provider's actual backup-product capabilities are
-  known.
+- **Backup-deletion design**: Azure Database for PostgreSQL Flexible
+  Server's own automated backups are configured for an initial 7-day
+  rotation window (`infra/azure/modules/postgresql.bicep`,
+  `docs/deployment/azure-ingestion-production.md` §4/§6) — "we have a
+  backup" is never treated as license to retain deleted data
+  indefinitely, and that same document's §6 explicitly states the
+  resulting maximum remaining backup window (up to 7 days after a
+  confirmed primary purge) so `docs/pilots/
+  ingestion-pilot-runbook.md` §16's own backup-rotation confirmation
+  level can state it precisely rather than leaving it a Phase 4G
+  unknown.
 
 ## 9. Rollback strategy
 
@@ -410,52 +412,85 @@ document, or any Phase 4F deliverable.** No secret has been created.
 - **RTO (recovery time objective)**: bounded by how quickly a new
   application-tier instance can be provisioned against a restored data
   tier — again a Phase 4G numeric decision, not asserted here.
-- **Known blocker before Phase 4G**: no disaster-recovery procedure has
-  been drafted, tested, or exercised, because no infrastructure exists
-  to test one against. A DR runbook (restore procedure, verification
-  steps, communication plan) is a **mandatory Phase 4G deliverable**,
-  separate from this architecture document.
+- **Update**: a disaster-recovery runbook now exists
+  (`docs/deployment/azure-ingestion-production.md` §7: RPO 24h, RTO 8h,
+  a restore-test procedure) — but the restore drill itself has not been
+  executed. See §11 item 8 below.
 
 ## 11. Known blockers before Phase 4G (consolidated)
 
-**Items 1–2 below block *authorizing* Phase 4G at all — they are
-preconditions to starting it, not activities performed within it.**
-Items 3–10 are things Phase 4G itself must still build/provision once
-authorized.
+**Items 1–2 previously blocked *authorizing* Phase 4G at all — both are
+now satisfied** (`docs/pilots/phase-4g-authorization-checklist.md`).
+Items 3–10 are things Phase 4G itself must still build/provision or
+verify; Phase 4G-A (`docs/deployment/azure-ingestion-production.md`)
+has implemented deployable code and infrastructure-as-code for several
+of them, but **created no Azure resource and verified nothing against a
+live Azure subscription** — each item below states exactly what remains.
 
-1. **Region/provider not selected** — this document recommends an
-   architecture *pattern*, not a provider or region (§3, §8). The user
-   must make and record this decision before Phase 4G may be authorized
-   to begin (`docs/pilots/phase-4g-authorization-checklist.md`).
-2. **No provider-specific cost estimate or budget approval exists** —
-   §2's cost comparisons are qualitative, not a numerical estimate; a
-   real, provider-specific cost estimate and explicit budget approval
-   (§3) must be completed, after provider/region selection, before
-   Phase 4G may be authorized to begin.
-3. **No real adapter implementations exist** for `MetadataStore`/
-   `ReportBlobStore`/`TokenStore` against any concrete managed product —
-   only the in-memory reference implementations (Phase 4B) exist today.
-4. **No persistent, distributed `AttemptLimiter`/`RequestRateLimiter`
-   implementation exists** — both are process-local in-memory today
-   (Phase 4F security review, threats 11/12).
-5. **No production entrypoint exists** to wire real adapters into
-   `IngestionApiConfig` and call `production_readiness.
-   validate_production_config` (Phase 4F's own new guard, added this
-   phase) before serving traffic.
-6. **No TLS certificate, secret manager, or service identity has been
-   provisioned.**
-7. **No backup/rotation configuration has been chosen or tested.**
-8. **No disaster-recovery runbook exists** (§10).
-9. **No deployment workflow has been built** — see §12 below, which
-   documents the *design* only.
-10. **No audited, tenant-scoped, operator-only ingestion-inventory
-    mechanism exists** — required before any pilot may be fully
-    offboarded; see `docs/pilots/ingestion-pilot-runbook.md` §16 and
-    its own blocker note.
+1. ~~Region/provider not selected~~ — **recorded**: Microsoft Azure,
+   Canada Central (2026-09-09, `docs/pilots/
+   phase-4g-authorization-checklist.md`).
+2. ~~No provider-specific cost estimate or budget approval exists~~ —
+   **recorded**: ~CAD $46–72/month estimate, CAD $100/month approved
+   ceiling (`docs/deployment/azure-ingestion-production.md` §5).
+3. **Real adapter implementations exist but are unverified against live
+   Azure** — `src/cloudops_guard/ingestion_azure/` implements
+   `MetadataStore`/`ReportBlobStore`/`TokenStore` against real
+   PostgreSQL and Azure Blob Storage, tested against a real local
+   PostgreSQL instance and a real local Azurite emulator only.
+4. **Persistent, distributed `AttemptLimiter`/`RequestRateLimiter`
+   implementations exist**, PostgreSQL-backed
+   (`postgres_attempt_limiter.py`/`postgres_request_rate_limiter.py`),
+   tested against real PostgreSQL including real concurrent-transaction
+   races — same "never against live Azure" caveat as item 3.
+5. **A production entrypoint exists**
+   (`src/cloudops_guard/ingestion_azure/entrypoint.py`), proven in a
+   real local container to fail closed without configuration and to
+   serve real traffic when configured against a real local PostgreSQL
+   instance — never run against real Azure infrastructure.
+6. **No TLS certificate, secret manager entry, or service identity has
+   been provisioned in a real Azure subscription.** Bicep definitions
+   for all three exist (`infra/azure/modules/keyvault.bicep`,
+   `managed-identities.bicep`) but define no resource until deployed.
+   Separately: the Key Vault this Bicep provisions has no public network
+   access at all (private-endpoint-only, by design), and no Bicep
+   resource in this codebase is capable of writing a secret value into
+   it — an approved, authenticated, audited execution environment
+   already inside the trusted network boundary must exist before any
+   real secret can be populated, and no such mechanism has been chosen
+   yet (`docs/deployment/azure-ingestion-production.md` §9 step 5, §11
+   item 9).
+7. **Backup/rotation configuration is chosen but not yet tested against
+   a real restore** — 7-day PostgreSQL backup retention
+   (`infra/azure/modules/postgresql.bicep`); see item 8.
+8. **A disaster-recovery runbook exists, but its restore drill has not
+   been executed** (`docs/deployment/azure-ingestion-production.md`
+   §7) — this remains a hard blocker until it has.
+9. **A deployment workflow now exists**
+   (`.github/workflows/deploy-ingestion-azure.yml`) — authored and
+   locally validated (`actionlint`), **never dispatched**. §12 below is
+   superseded by this real, executable workflow for the Azure
+   implementation specifically.
+10. **An audited, tenant-scoped, operator-only ingestion-inventory
+    mechanism exists** (`src/cloudops_guard/ingestion_azure/
+    inventory.py`, `ops_cli.py`), tested against real PostgreSQL
+    including the pilot runbook's own tabletop scenario — never yet
+    exercised against a live pilot customer's data; see
+    `docs/pilots/ingestion-pilot-runbook.md` §16.
 
 ---
 
 ## 12. Deployment-workflow design (Phase 4G, not implemented here)
+
+**Superseded, for the Azure implementation specifically, by a real,
+executable workflow**: `.github/workflows/deploy-ingestion-azure.yml`
+(Phase 4G-A) implements every stage this section describes, adapted for
+Azure OIDC/workload identity and a container image instead of a static
+site — see `docs/deployment/azure-ingestion-production.md` §1/§9. That
+workflow has been authored and locally validated (`actionlint`) but
+**never dispatched** — this section is retained below as the original,
+provider-neutral design record it was always meant to be, not because
+the design itself is still unimplemented.
 
 This section documents the **exact proposed** Phase 4G deployment
 workflow design. **No executable, provider-specific deployment workflow

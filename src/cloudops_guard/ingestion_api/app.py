@@ -161,12 +161,22 @@ def _reject_any_occurrence(scope: Scope, name: bytes, error_code: str) -> None:
         raise ApiError(error_code)
 
 
-def _peer_source_identifier(request: Request) -> str:
-    """Layer 2/Layer-2.5's abuse-protection source identifier, derived
-    **only** from the actual ASGI-reported peer connection (`scope["client"]`)
-    -- never from `X-Forwarded-For`/`Forwarded`, which this function does
-    not even read, until a future deployment phase explicitly defines a
-    set of trusted proxies (task 10).
+def _peer_source_identifier(request: Request, config: IngestionApiConfig) -> str:
+    """Layer 2/Layer-2.5's abuse-protection source identifier.
+
+    **Phase 4G-A**: if `config.source_identifier_resolver` is set, this
+    delegates to it entirely -- a production deployment behind a specific,
+    documented reverse-proxy topology (e.g. Azure Container Apps' own
+    ingress) supplies one so the real client address that topology's own
+    documentation establishes as trustworthy is used, rather than the
+    proxy's own peer address (see `IngestionApiConfig.
+    source_identifier_resolver`'s own docstring for the full reasoning).
+
+    **Default (unset) behavior, unchanged from Phase 4D**: derived
+    **only** from the actual ASGI-reported peer connection
+    (`scope["client"]`) -- never from `X-Forwarded-For`/`Forwarded`,
+    which this function does not even read in this mode, since no trusted
+    proxy has been configured.
 
     **Host only, never the client's ephemeral TCP port**: a real client
     opens a fresh, kernel-assigned source port for every TCP connection
@@ -179,6 +189,8 @@ def _peer_source_identifier(request: Request) -> str:
     test, which failed (30/30 requests succeeded against a threshold of
     15) until this function stopped including the port.
     """
+    if config.source_identifier_resolver is not None:
+        return config.source_identifier_resolver(request)
     client = request.client
     if client is None:
         return "unknown"
@@ -207,7 +219,7 @@ def _authenticate(request: Request, config: IngestionApiConfig) -> Authenticated
     if not auth_header.startswith("Bearer "):
         raise ApiError(UNAUTHORIZED)
     presented_token = auth_header[len("Bearer ") :]
-    source_identifier = _peer_source_identifier(request)
+    source_identifier = _peer_source_identifier(request, config)
 
     coordinator = AuthenticationCoordinator(
         token_store=config.token_store,
@@ -263,7 +275,7 @@ def _assert_content_length_singleton(request: Request) -> None:
 
 
 def _check_capabilities_rate_limits_blocking(request: Request, config: IngestionApiConfig) -> None:
-    source_identifier = _peer_source_identifier(request)
+    source_identifier = _peer_source_identifier(request, config)
     try:
         check_capabilities_allowed(source_identifier, attempt_limiter=config.source_limiter)
         check_and_record_capabilities_request(

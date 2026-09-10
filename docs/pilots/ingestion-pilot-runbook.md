@@ -70,16 +70,16 @@ v0.4.0-phase-4f-security-readiness.md` threat 2).
 
 The customer must be told, explicitly and in writing, the exact region
 in which their metadata, report bytes, and backups of both will be
-stored — per `docs/deployment/ingestion-production.md` §3/§8, the
-provider and region decision is a **mandatory precondition to
-*authorizing* Phase 4G**, not an activity performed during it and not a
-default to discover later. This runbook cannot state a specific region,
-because none has been selected — see
-`docs/pilots/phase-4g-authorization-checklist.md`'s "Preconditions to
-authorizing Phase 4G at all" for the exact required sequence (provider/
-region decision, then cost/budget approval, then Phase 4G may be
-authorized to begin, then Phase 4G provisions against that
-already-recorded decision).
+stored. **Recorded 2026-09-09**: Microsoft Azure, Canada Central
+(`canadacentral`) — `docs/pilots/phase-4g-authorization-checklist.md`,
+`docs/deployment/azure-ingestion-production.md` §0. This was a
+mandatory precondition to *authorizing* Phase 4G (`docs/deployment/
+ingestion-production.md` §3/§8), never an activity performed during it,
+and it is now satisfied — this does not, by itself, mean a real pilot
+customer may be told this region is live: it becomes true only once
+Phase 4G-B has actually provisioned infrastructure in this region
+(`docs/deployment/azure-ingestion-production.md` §9's provisioning
+checklist).
 
 ## 5. Retention and deletion behavior
 
@@ -113,6 +113,17 @@ already-recorded decision).
 - The plaintext token is shown to the operator **exactly once** at
   provisioning time (`docs/manual-token-provisioning.md` step 4);
   nothing in this codebase logs, persists, or can later re-display it.
+- **Distinct from a pilot token, and still unresolved**: the Azure Key
+  Vault storing this environment's own database/limiter secrets has no
+  public network access at all (private-endpoint-only, by design) —
+  populating those secrets requires an approved, authenticated, audited
+  execution environment already inside the trusted network boundary,
+  which has not yet been chosen. This runbook never assumes an ordinary
+  local machine or GitHub-hosted runner can reach that vault — see
+  `docs/deployment/azure-ingestion-production.md` §9 step 5 and §11 item
+  9, and `docs/pilots/phase-4g-authorization-checklist.md`'s own
+  precondition, for the options under consideration and the explicit
+  human decision still required before any pilot begins.
 
 ## 7. Token rotation and revocation
 
@@ -256,20 +267,29 @@ resume); offboarding (§16) is not.
 
 ## 16. Offboarding and final-deletion confirmation
 
-**Hard blocker: complete pilot offboarding cannot be guaranteed today,
-and must not be attempted for a real pilot, until the mechanism in step
-2 below exists and has been tested end to end.** This is listed as a
-precondition item in
-`docs/pilots/phase-4g-authorization-checklist.md` and as a consolidated
-blocker in `docs/deployment/ingestion-production.md` §11. Nothing in
-this section authorizes building that mechanism as part of this
-(Phase 4F) correction pass — it is Phase 4G scope, recorded here so it
-is not overlooked.
+**Update (Phase 4G-A): the mechanism §"Required mechanism" below
+describes has now been implemented**
+(`src/cloudops_guard/ingestion_azure/inventory.py`, `ops_cli.py
+tenant-offboard-plan`/`tenant-offboard-execute`) and tested against a
+real PostgreSQL instance, including this section's own tabletop
+scenario below — but **never yet exercised against a live pilot
+customer's actual data, and no real Azure infrastructure has been
+provisioned to run it against.** The hard blocker below is therefore
+**not yet fully lifted** — it now reads "implemented and locally
+tested, not yet proven against a live pilot" rather than "does not
+exist":
 
-### Required mechanism (Phase 4G scope, not yet built)
+**Hard blocker: complete pilot offboarding must not be attempted for a
+real pilot until this mechanism has been exercised against the actual
+production deployment it will be used against.** This is listed as a
+precondition item in `docs/pilots/phase-4g-authorization-checklist.md`
+and as a consolidated blocker in `docs/deployment/
+ingestion-production.md` §11.
 
-Before any real pilot may be offboarded, Phase 4G must provide an
-**audited, operator-only** method that, for a given tenant:
+### Required mechanism (implemented in Phase 4G-A)
+
+Before any real pilot may be offboarded, an **audited, operator-only**
+method must exist that, for a given tenant:
 
 - returns a **complete** inventory of that tenant's ingestion records
   (every status: received, retired, and still-tombstoned) — derived
@@ -339,7 +359,13 @@ requirement.
      elapsed **and been verified** (e.g. confirming the specific backup
      generation containing the data has actually rotated out, not
      inferred from "the documented window has passed" alone,
-     `docs/deployment/ingestion-production.md` §8).
+     `docs/deployment/ingestion-production.md` §8). **For the Azure
+     implementation, this window is up to 7 days** after a confirmed
+     primary purge (Azure Database for PostgreSQL Flexible Server's own
+     automated-backup retention, `docs/deployment/
+     azure-ingestion-production.md` §6/§0) — state this exact figure to
+     the customer, never a shorter or unqualified one, and never claim
+     it has elapsed without verification.
 4. Do not send the "all retained customer-linked data is gone"
    confirmation until *all four* levels above are satisfied and
    verified for *every* record found in step 2 — primary purge,

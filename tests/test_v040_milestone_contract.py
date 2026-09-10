@@ -1166,22 +1166,28 @@ class TestPhase4BDocumentationMatchesRealCode:
         assert "Phase 4E" in milestone_text
         assert "uncommitted, pending independent review" in milestone_text
 
-    def test_only_phase_4b_4c_4d_and_4e_are_marked_implemented_in_the_phase_plan(
+    def test_only_phase_4b_4c_4d_4e_and_4g_a_are_marked_implemented_in_the_phase_plan(
         self, milestone_text: str
     ) -> None:
         # Guards against a careless future edit marking a later phase (4F+)
-        # implemented before it actually is: exactly four "Status:
+        # implemented before it actually is: exactly five "Status:
         # implemented" markers may exist in the phase-plan section, and
-        # they must belong to Phase 4B, Phase 4C, Phase 4D, and Phase 4E
-        # specifically, in order -- updated from three to four now that
-        # Phase 4E (uploader) has itself been implemented (uncommitted,
-        # pending independent review; the marker text itself says so).
+        # they must belong to Phase 4B, Phase 4C, Phase 4D, Phase 4E, and
+        # Phase 4G-A specifically, in order -- updated from four to five
+        # now that Phase 4G-A (Azure implementation/deployment tooling)
+        # has itself been implemented (uncommitted, pending independent
+        # review; the marker text itself says so). Phase 4F is
+        # deliberately *not* one of these five: its own phase-plan entry
+        # says "review complete," never "implemented" (Phase 4F is a
+        # review of already-implemented phases, not an implementation of
+        # new code itself) -- and Phase 4G-B must never appear here
+        # either, since it is explicitly "not started."
         phase_plan_section = _extract_section(
             milestone_text, r"## I\. Phase plan \(Phase 4B through 4G, proposed\)", r"$"
         )
         markers = [m.start() for m in re.finditer(r"Status: implemented", phase_plan_section)]
-        assert len(markers) == 4, (
-            f"expected exactly four phases marked implemented in the phase plan, "
+        assert len(markers) == 5, (
+            f"expected exactly five phases marked implemented in the phase plan, "
             f"found {len(markers)}"
         )
         phase_4b_heading = phase_plan_section.find("Phase 4B — Storage and token interfaces")
@@ -1189,15 +1195,26 @@ class TestPhase4BDocumentationMatchesRealCode:
         phase_4d_heading = phase_plan_section.find("Phase 4D —")
         phase_4e_heading = phase_plan_section.find("Phase 4E —")
         phase_4f_heading = phase_plan_section.find("Phase 4F —")
+        phase_4g_a_heading = phase_plan_section.find("Phase 4G-A —")
+        phase_4g_b_heading = phase_plan_section.find("Phase 4G-B —")
         assert phase_4b_heading != -1
         assert phase_4c_heading != -1
         assert phase_4d_heading != -1
         assert phase_4e_heading != -1
         assert phase_4f_heading != -1
+        assert phase_4g_a_heading != -1
+        assert phase_4g_b_heading != -1
         assert phase_4b_heading < markers[0] < phase_4c_heading
         assert phase_4c_heading < markers[1] < phase_4d_heading
         assert phase_4d_heading < markers[2] < phase_4e_heading
         assert phase_4e_heading < markers[3] < phase_4f_heading
+        assert phase_4g_a_heading < markers[4] < phase_4g_b_heading
+        # Phase 4G-B's own status marker must never say "implemented".
+        phase_4g_b_text = _normalize_whitespace(
+            phase_plan_section[phase_4g_b_heading : phase_4g_b_heading + 200]
+        )
+        assert "Status: implemented" not in phase_4g_b_text
+        assert "not started" in phase_4g_b_text
 
     def test_readme_and_roadmap_mention_phase_4b(self, roadmap_text: str) -> None:
         readme_text = _read(README_MD)
@@ -1506,15 +1523,32 @@ class TestProviderRegionDecisionIsAPreconditionNotAnActivity:
         self, ingestion_deployment_doc_text: str
     ) -> None:
         text = _normalize_whitespace(ingestion_deployment_doc_text)
-        assert "a mandatory precondition to *authorizing* Phase 4G" in text
-        assert "not an activity performed during it" in text
+        # Phase 4G-A correction: the provider/region decision has since
+        # been recorded (Microsoft Azure, Canada Central) -- the §8
+        # bullet now states the recorded decision rather than describing
+        # it as still-open, but the underlying sequencing principle (the
+        # decision was made *before* Phase 4G-A, never selected by any
+        # automated process) must still be traceable here.
+        assert "Microsoft Azure, Canada Central" in text
+        assert "recorded 2026-09-09" in text
+        # The original, unedited opening paragraph (§"Correction") is
+        # still the authoritative statement of the sequencing principle
+        # itself -- confirmed unchanged by the sibling test
+        # test_deployment_doc_states_the_corrected_five_step_sequence.
+        assert "is **not** a Phase 4G activity" in text
 
     def test_deployment_doc_blocker_list_separates_authorization_from_execution(
         self, ingestion_deployment_doc_text: str
     ) -> None:
         text = _normalize_whitespace(ingestion_deployment_doc_text)
-        assert "block *authorizing* Phase 4G at all" in text
-        assert "preconditions to starting it, not activities performed within it" in text
+        # Phase 4G-A correction: items 1-2 are no longer open blockers
+        # (both preconditions are now satisfied) -- the §11 intro now
+        # says so explicitly, replacing the old present-tense "block...
+        # at all" framing, while still naming items 1-2 as having been
+        # preconditions to authorization, never activities performed
+        # within Phase 4G itself.
+        assert "previously blocked *authorizing* Phase 4G at all" in text
+        assert "both are now satisfied" in text
 
     def test_deployment_doc_cost_figures_are_disclaimed_as_qualitative(
         self, ingestion_deployment_doc_text: str
@@ -1563,7 +1597,12 @@ class TestProviderRegionDecisionIsAPreconditionNotAnActivity:
     ) -> None:
         text = _normalize_whitespace(pilot_runbook_text)
         assert "mandatory precondition to *authorizing* Phase 4G" in text
-        assert "Preconditions to authorizing Phase 4G at all" in text
+        # Phase 4G-A correction: the decision has since been recorded --
+        # the section now states the recorded provider/region rather
+        # than pointing forward to an unresolved precondition, but must
+        # still name the exact decision and its recording date.
+        assert "Microsoft Azure, Canada Central" in text
+        assert "Recorded 2026-09-09" in text
 
     def test_no_document_says_region_acceptance_remains_exclusively_phase_4g(
         self,
@@ -1652,7 +1691,12 @@ class TestOffboardingRequiresAuditedTenantInventoryNotJustCustomerIds:
         self, pilot_runbook_text: str
     ) -> None:
         text = _normalize_whitespace(pilot_runbook_text)
-        assert "Hard blocker: complete pilot offboarding cannot be guaranteed today" in text
+        # Phase 4G-A correction: the mechanism is now implemented and
+        # locally tested (never merely "does not exist"), so the hard
+        # blocker's own wording changed to reflect what remains true --
+        # it must never be attempted for a real pilot until exercised
+        # against the actual production deployment.
+        assert "Hard blocker: complete pilot offboarding must not be attempted" in text
         assert "**audited, operator-only** method" in text
 
     def test_runbook_inventory_mechanism_does_not_rely_solely_on_customer_ids(
@@ -1711,7 +1755,12 @@ class TestOffboardingRequiresAuditedTenantInventoryNotJustCustomerIds:
         self, ingestion_deployment_doc_text: str
     ) -> None:
         text = _normalize_whitespace(ingestion_deployment_doc_text)
-        assert "No audited, tenant-scoped, operator-only ingestion-inventory" in text
+        # Phase 4G-A correction: the mechanism is now implemented -- item
+        # 10 changed from "No ... exists" to "An ... exists", but must
+        # still disclose it has never been exercised against a live
+        # pilot customer's data.
+        assert "An audited, tenant-scoped, operator-only ingestion-inventory" in text
+        assert "mechanism exists" in text
 
 
 # --- Phase 4F correction pass: documentation self-consistency ---------------

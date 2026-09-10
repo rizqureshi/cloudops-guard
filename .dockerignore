@@ -1,0 +1,45 @@
+# Phase 4G-A: the final production image must never contain repository
+# history, tests, reports, documentation, the web/ site, local secrets,
+# or build caches. `Dockerfile`'s own builder stage additionally COPYs an
+# explicit, narrow file list (belt-and-suspenders) -- this file is the
+# primary boundary.
+
+.git
+.github
+.claude
+
+# Never anything test-, doc-, or web-shaped.
+tests
+docs
+web
+infra
+
+# Local reports/output this project's own CLI produces -- never baked
+# into an image.
+*.html
+report.json
+report.html
+
+# Local secrets/environment files -- never present in this repository as
+# tracked files, excluded here as defense in depth regardless.
+.env
+.env.*
+*.pem
+*.key
+
+# Python/uv/build caches and artifacts.
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.venv
+dist
+build
+*.egg-info
+
+# Editor/OS noise.
+.DS_Store
+.vscode
+.idea

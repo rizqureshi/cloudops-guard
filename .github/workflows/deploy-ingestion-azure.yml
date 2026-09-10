@@ -1,0 +1,1234 @@
+name: Deploy ingestion API (Azure production)
+
+# Phase 4G-A -- FUTURE deployment tooling only. Implementing/reviewing
+# this workflow does not run it, and no step here executes automatically
+# on push, pull request, tag, release, or schedule. Dispatching this
+# workflow for real is Phase 4G-B, separately authorized, work -- see
+# docs/deployment/azure-ingestion-production.md for the complete operator
+# procedure, prerequisites, and every GitHub/Azure resource a human must
+# configure out of band before a real dispatch can succeed.
+#
+# Mirrors deploy-web.yml's own established pattern (manual dispatch only,
+# exact confirmation phrase, exact commit SHA, credential-free preflight
+# validation, protected-Environment-gated deploy job) adapted for: a
+# container image (not a static site), Azure OIDC/workload identity (not
+# a Cloudflare API token), and a three-value action selector
+# (plan/deploy/rollback) instead of one fixed deploy action.
+#
+# **Correction-pass item 2 -- plan/deploy must describe the same
+# operation**: `foundation.bicep` (VNet, ACR, Key Vault, PostgreSQL,
+# managed identities -- provisioned once, rarely changed) and
+# `app.bicep` (the Container App + Jobs -- redeployed on every release)
+# are genuinely different templates for different stages, so `plan`'s
+# foundation what-if (below) is kept as a separate, informational,
+# rare-change preview -- an operator who wants to preview a foundation
+# change reviews it there before applying it manually, per
+# docs/deployment/azure-ingestion-production.md's own foundation
+# provisioning procedure. **Foundation provisioning itself stays
+# deliberately outside this workflow** (never automated here) -- but the
+# per-release `app.bicep` operation `plan` reviews and `deploy` applies
+# is now made to be the exact same operation: `build` computes the real,
+# content-addressed image digest **entirely offline, without ever
+# contacting Azure or pushing anything** (correction-pass item 3 -- see
+# that job's own comments and `scripts/extract_oci_digest.py`); `plan`
+# generates the real ephemeral application-parameters file (`scripts/
+# generate_app_deployment_params.py`, sourced from the already-applied
+# `foundation` deployment's live outputs -- never the checked-in,
+# placeholder-valued `infra/azure/app.bicepparam`) using that digest, and
+# runs `app.bicep`'s own what-if against it -- still no push, no ACR
+# mutation. That exact generated file is retained as a workflow artifact
+# and downloaded, unmodified, by `deploy`, which is the *only* job that
+# ever publishes anything (gated on `verify`/`plan` both succeeding and
+# the protected `production` Environment's approval), and which
+# independently verifies the digest it actually publishes matches the
+# one `plan` reviewed before applying anything. There is no code path by
+# which the parameters/image a human approver reviewed in `plan` can
+# differ from what `deploy` actually publishes and applies.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type exactly "DEPLOY-INGESTION-AZURE" to confirm.'
+        required: true
+        type: string
+      commit_sha:
+        description: "Full 40-character commit SHA to deploy. Must be reachable from origin/main."
+        required: true
+        type: string
+      action:
+        description: "What to do."
+        required: true
+        type: choice
+        options:
+          - plan
+          - deploy
+          - rollback
+      target_environment:
+        description: "Target Container Apps environment name. Must be 'pilot' -- the only environment this codebase's infrastructure and documentation currently describe."
+        required: true
+        type: string
+      approved_budget_amount:
+        description: 'The approver''s own restatement of the approved monthly budget ceiling, e.g. "CAD 100" -- validated against infra/azure/modules/budget.bicep''s own configured monthlyAmount, never merely logged.'
+        required: true
+        type: string
+      rollback_image_digest:
+        description: 'Required only when action=rollback -- e.g. "sha256:<64 lowercase hex characters>". Ignored for plan/deploy.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # A production deployment/rollback is never silently superseded by a
+  # second, concurrent dispatch -- mirrors deploy-web.yml exactly.
+  group: deploy-ingestion-azure-production
+  cancel-in-progress: false
+
+env:
+  REQUIRED_CONFIRMATION_PHRASE: "DEPLOY-INGESTION-AZURE"
+  # Pinned Bicep CLI version -- matches the exact version this correction
+  # pass validated every template against locally (correction-pass item
+  # 1: "Install and run a pinned Bicep CLI in verify"). Bump
+  # deliberately, together with a local re-validation of every template,
+  # never silently drift to "whatever's newest."
+  BICEP_VERSION: "v0.47.16"
+  # Correction pass, item 5: pinning only the URL/version is insufficient
+  # integrity verification -- this is the real SHA-256 of the
+  # `bicep-linux-x64` asset for the exact version above, independently
+  # computed from the real GitHub release on 2026-09-10 (`shasum -a 256`
+  # against a fresh download). If the binary at that URL is ever
+  # silently replaced (compromised release infrastructure, a MITM on the
+  # download), the checksum step below fails closed rather than
+  # executing a different binary than the one this pass actually
+  # validated every template against.
+  BICEP_SHA256: "64c345a58e0c3e48b1bc98a4e62d6b3adb1d238281297de3400aeafb2697aa5a"
+
+jobs:
+  # Credential-free -- proves the dispatch is legitimate before any later
+  # job (which may hold Azure credentials via a protected Environment) is
+  # allowed to run at all. Mirrors deploy-web.yml's own `validate` job.
+  validate:
+    name: Validate dispatch
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.normalize.outputs.commit_sha }}
+    steps:
+      - name: Require dispatch from the main branch
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "This workflow may only be dispatched from the main branch (got: $DISPATCH_REF)." >&2
+            exit 1
+          fi
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+
+      - name: Require the exact typed confirmation phrase
+        run: |
+          if [ "$INPUT_CONFIRMATION" != "$REQUIRED_CONFIRMATION_PHRASE" ]; then
+            echo "Confirmation input did not exactly match the required phrase." >&2
+            exit 1
+          fi
+        env:
+          INPUT_CONFIRMATION: ${{ github.event.inputs.confirmation }}
+
+      - name: Require a well-formed 40-character hexadecimal commit SHA
+        id: normalize
+        run: |
+          if ! [[ "$INPUT_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be exactly 40 hexadecimal characters." >&2
+            exit 1
+          fi
+          normalized="$(printf '%s' "$INPUT_COMMIT_SHA" | tr '[:upper:]' '[:lower:]')"
+          echo "commit_sha=$normalized" >>"$GITHUB_OUTPUT"
+        env:
+          INPUT_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
+
+      - name: Require rollback_image_digest when action=rollback, and validate its shape
+        if: github.event.inputs.action == 'rollback'
+        run: |
+          digest="$INPUT_DIGEST"
+          if [ -z "$digest" ]; then
+            echo "rollback_image_digest is required when action=rollback." >&2
+            exit 1
+          fi
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "rollback_image_digest must be exactly 'sha256:' plus 64 lowercase hexadecimal characters." >&2
+            exit 1
+          fi
+        env:
+          INPUT_DIGEST: ${{ github.event.inputs.rollback_image_digest }}
+
+      - name: Check out the exact requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.normalize.outputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out HEAD equals the requested commit
+        run: |
+          actual="$(git rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+          if [ "$actual" != "$EXPECTED_COMMIT_SHA" ]; then
+            echo "Checked-out HEAD does not equal the requested commit_sha." >&2
+            exit 1
+          fi
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.normalize.outputs.commit_sha }}
+
+      - name: Verify the commit is reachable from origin/main (an approved commit)
+        run: |
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$EXPECTED_COMMIT_SHA" origin/main; then
+            echo "The requested commit is not reachable from origin/main -- refusing to deploy an unapproved commit." >&2
+            exit 1
+          fi
+        env:
+          EXPECTED_COMMIT_SHA: ${{ steps.normalize.outputs.commit_sha }}
+
+      - name: Validate target_environment names a supported environment
+        # Correction-pass item 1: "Validate the budget acknowledgement and
+        # target environment rather than merely logging unused arbitrary
+        # inputs." 'pilot' is the only environment foundation.bicep's own
+        # tags.environment and every deployment/pilot document currently
+        # describe -- an unrecognized name is refused, never silently
+        # accepted as though this codebase's infrastructure supported it.
+        run: |
+          if [ "$TARGET_ENVIRONMENT" != "pilot" ]; then
+            echo "target_environment must be 'pilot' -- the only environment this codebase's infrastructure (foundation.bicep's own tags.environment) and documentation currently describe. Refusing an unsupported environment name." >&2
+            exit 1
+          fi
+        env:
+          TARGET_ENVIRONMENT: ${{ github.event.inputs.target_environment }}
+
+      - name: Validate approved_budget_amount restates the actual configured budget ceiling
+        # Compares the human's typed restatement against the number
+        # infra/azure/modules/budget.bicep actually configures (the
+        # single source of truth), never a separately hardcoded string
+        # here that could silently drift from what Bicep really sets.
+        run: |
+          configured="$(grep -oE "param monthlyAmount int = [0-9]+" infra/azure/modules/budget.bicep | grep -oE '[0-9]+')"
+          if [ -z "$configured" ]; then
+            echo "could not determine the configured monthly budget ceiling from infra/azure/modules/budget.bicep." >&2
+            exit 1
+          fi
+          if ! echo "$INPUT_BUDGET" | grep -qi "cad"; then
+            echo "approved_budget_amount must explicitly name the currency (CAD) -- got: '$INPUT_BUDGET'." >&2
+            exit 1
+          fi
+          digits="$(echo "$INPUT_BUDGET" | grep -oE '[0-9]+' | tr '\n' ' ' | xargs)"
+          digit_count="$(echo "$INPUT_BUDGET" | grep -oE '[0-9]+' | wc -l | xargs)"
+          if [ "$digit_count" != "1" ] || [ "$digits" != "$configured" ]; then
+            echo "approved_budget_amount must restate exactly CAD $configured (the value infra/azure/modules/budget.bicep actually configures) -- got: '$INPUT_BUDGET'." >&2
+            exit 1
+          fi
+        env:
+          INPUT_BUDGET: ${{ github.event.inputs.approved_budget_amount }}
+
+      - name: Record dispatch metadata in the audit trail
+        # The GitHub Actions run log itself is the durable audit trail
+        # (mirrors deploy-web.yml) -- never a report/token value, only
+        # the approving identity, the exact commit, the action, and the
+        # target environment.
+        run: |
+          echo "actor=${{ github.actor }}"
+          echo "commit_sha=${{ steps.normalize.outputs.commit_sha }}"
+          echo "action=${{ github.event.inputs.action }}"
+          echo "target_environment=${{ github.event.inputs.target_environment }}"
+          echo "approved_budget_amount (approver's own restatement, now validated)=${{ github.event.inputs.approved_budget_amount }}"
+
+  # Builds one immutable OCI artifact from the exact reviewed commit and
+  # computes the exact content digest it will carry once published --
+  # this job never logs into Azure and never pushes anything anywhere
+  # (**correction pass, item 7**: an earlier version of this comment,
+  # inherited from a prior design where `build` itself pushed to ACR,
+  # still claimed that; it does not describe this job's current
+  # behavior -- the *only* job in this entire workflow that ever
+  # publishes an image is `deploy`, below, gated on `verify`/`plan` both
+  # succeeding and the protected `production` Environment's approval).
+  #
+  # Skipped for action=rollback, which redeploys an already-existing,
+  # already-pushed digest instead of building a new one.
+  # **Correction pass, item 3**: this job never touches Azure and never
+  # publishes anything -- it builds one local artifact and computes the
+  # exact digest that artifact will carry once published, entirely
+  # offline. This is what makes `action=plan` genuinely non-mutating and
+  # what guarantees nothing is ever published before `verify`/`plan`
+  # both succeed and the protected `production` Environment approves --
+  # the only job that ever runs a push is `deploy`, below.
+  build:
+    name: Build artifact (no push, no Azure access)
+    needs: validate
+    if: github.event.inputs.action != 'rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image_digest: ${{ steps.digest.outputs.image_digest }}
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Create a docker-container buildx builder (required for the OCI exporter)
+        run: docker buildx create --name oci-builder --driver docker-container --use --bootstrap
+
+      - name: "Build once, export twice: a real OCI archive (for the digest and eventual push) and a docker-loadable archive (for local inspection in verify)"
+        # Both outputs come from the exact same `docker buildx build`
+        # invocation, so they share byte-identical layers/config --
+        # confirmed directly during this correction pass's own
+        # implementation (buildkit reported the identical manifest
+        # digest for both export types in a real local build). Only the
+        # OCI archive's digest is ever treated as authoritative (`plan`/
+        # `deploy` below use it); the docker archive exists solely so
+        # `verify` can run real container inspection commands, which
+        # `crane` (a manifest/registry tool, not a container runtime)
+        # cannot do.
+        run: |
+          mkdir -p /tmp/artifact
+          docker buildx build \
+            --builder oci-builder \
+            --build-arg GIT_COMMIT_SHA="${COMMIT_SHA}" \
+            -t "ingestion-api:build-${COMMIT_SHA}" \
+            --output type=oci,dest=/tmp/artifact/ingestion-api-oci.tar \
+            --output type=docker,dest=/tmp/artifact/ingestion-api-docker.tar \
+            .
+        env:
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+
+      - name: "Validate the complete OCI descriptor graph and compute the exact manifest digest this artifact will carry once published (no registry contacted)"
+        # Correction pass, item 3: `extract_oci_digest.py` now validates
+        # every blob this archive references (manifest, config, every
+        # layer) by independently resolving and re-hashing its actual
+        # content -- never merely trusting a digest string recorded in
+        # `index.json` -- and rejects unsafe tar members, duplicate
+        # critical members, and an unsupported layout version. Runners
+        # here are `ubuntu-latest` (amd64); `--expected-architecture`
+        # fails closed if buildx ever silently produced a different
+        # platform than intended.
+        id: digest
+        run: |
+          digest="$(python3 scripts/extract_oci_digest.py /tmp/artifact/ingestion-api-oci.tar --expected-os linux --expected-architecture amd64)"
+          echo "computed image digest: $digest"
+          echo "image_digest=$digest" >>"$GITHUB_OUTPUT"
+
+      - name: Upload both artifacts (used unchanged by verify, plan, and deploy -- never rebuilt)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ingestion-api-image
+          path: |
+            /tmp/artifact/ingestion-api-oci.tar
+            /tmp/artifact/ingestion-api-docker.tar
+          retention-days: 1
+
+  # Credential-free release-readiness gates, run against the exact
+  # reviewed commit -- the full test suite, Ruff, packaging/dependency/
+  # secret checks -- plus image-content inspection against the artifact
+  # `build` just produced (never rebuilt here). Skipped for
+  # action=rollback (nothing new to verify -- the rollback digest was
+  # already verified when it was first deployed).
+  verify:
+    name: Verify release readiness and artifact contents
+    needs: [validate, build]
+    if: github.event.inputs.action != 'rollback'
+    runs-on: ubuntu-latest
+    services:
+      # Pinned by digest (correction-pass item 8), not merely a mutable
+      # tag -- `postgres:16-alpine` and Azurite's own `latest` tag can
+      # both be silently repointed by their publishers; a digest is the
+      # only thing that actually guarantees "the exact image this
+      # workflow was reviewed against."
+      # Pinned by digest, verified via `docker pull postgres:16-alpine`
+      # against the real Docker Hub registry on 2026-09-09 -- re-verify
+      # and update deliberately (never silently) if this image is ever
+      # intentionally upgraded.
+      postgres:
+        image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # Pinned by digest, verified via `docker pull mcr.microsoft.com/
+      # azure-storage/azurite:latest` against the real MCR registry on
+      # 2026-09-09.
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
+        ports:
+          - 10000:10000
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install locked dependencies (including azure-production, for the Azure-adapter suite)
+        run: uv sync --locked --extra dev --extra api --extra azure-production
+
+      - name: "Install a pinned, checksum-verified Bicep CLI (correction-pass item 5: install BEFORE pytest, never after -- Bicep tests use `pytest.mark.skipif(bicep not found)`, so installing it afterward means every real compiled-template assertion silently never ran)"
+        run: |
+          curl -sSL -o /usr/local/bin/bicep "https://github.com/Azure/bicep/releases/download/${BICEP_VERSION}/bicep-linux-x64"
+          actual_sha256="$(sha256sum /usr/local/bin/bicep | cut -d' ' -f1)"
+          if [ "$actual_sha256" != "$BICEP_SHA256" ]; then
+            echo "Bicep CLI checksum mismatch: expected $BICEP_SHA256, got $actual_sha256 -- refusing to execute a binary that does not match the independently pinned, verified checksum." >&2
+            exit 1
+          fi
+          chmod +x /usr/local/bin/bicep
+          bicep --version
+
+      - name: Run full pytest suite (Postgres/Azurite-marked tests included, real services below; Bicep CLI already installed above so no compiled-template test is silently skipped)
+        run: uv run pytest
+        env:
+          COG_AZURE_TESTS_REQUIRED: "1"
+          COG_TEST_POSTGRES_CONNINFO: "postgresql://postgres:postgres@localhost:5432/postgres"
+          COG_TEST_AZURITE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+
+      - name: "Verify the Bicep-dependent test file actually ran (never silently skipped), and report its exact count"
+        # Correction-pass item 5's own explicit requirement: "Reports the
+        # exact number of Bicep tests executed." Runs the file in
+        # isolation so its own pass/skip counts are unambiguous, and
+        # fails closed on any skip at all (the canary test in this file,
+        # `test_bicep_cli_is_required_and_present_in_ci`, already fails
+        # loudly if Bicep itself is missing when COG_AZURE_TESTS_REQUIRED
+        # is set -- this step is the second, independent confirmation
+        # that nothing in this file was silently skipped for any reason).
+        run: |
+          output="$(uv run pytest tests/ingestion_azure/test_bicep_infrastructure.py -v 2>&1)"
+          echo "$output"
+          summary_line="$(echo "$output" | tail -1)"
+          echo "Bicep test summary: $summary_line"
+          if echo "$summary_line" | grep -qE "skipped|error"; then
+            echo "one or more Bicep-dependent tests were skipped or errored -- refusing to treat Bicep verification as complete." >&2
+            exit 1
+          fi
+          passed_count="$(echo "$summary_line" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')"
+          if [ -z "$passed_count" ] || [ "$passed_count" -lt 1 ]; then
+            echo "expected at least one passed Bicep test, got: $summary_line" >&2
+            exit 1
+          fi
+          echo "confirmed: $passed_count Bicep-dependent tests actually executed (zero skipped)."
+        env:
+          COG_AZURE_TESTS_REQUIRED: "1"
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - name: Bicep build every template, zero warnings
+        run: |
+          set -euo pipefail
+          fail=0
+          for template in infra/azure/foundation.bicep infra/azure/app.bicep; do
+            echo "=== bicep build $template ==="
+            output="$(bicep build "$template" --stdout 2>&1 >/dev/null)" || { echo "$output"; fail=1; continue; }
+            if [ -n "$output" ]; then
+              echo "$output"
+              echo "bicep build produced warnings for $template -- zero warnings required." >&2
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      - name: Bicep parameter file compilation check (never a real deployment)
+        run: |
+          bicep build-params infra/azure/foundation.bicepparam --outfile /tmp/foundation.parameters.json
+          bicep build-params infra/azure/app.bicepparam --outfile /tmp/app.parameters.json
+
+      - name: Download the image artifact (the exact OCI + docker archives `build` produced -- never rebuilt)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ingestion-api-image
+          path: /tmp/artifact
+
+      - name: "Re-verify the downloaded OCI archive's complete descriptor graph and digest match what build computed (defense in depth against transit corruption/tampering)"
+        run: |
+          actual="$(python3 scripts/extract_oci_digest.py /tmp/artifact/ingestion-api-oci.tar --expected-os linux --expected-architecture amd64)"
+          if [ "$actual" != "$EXPECTED_DIGEST" ]; then
+            echo "downloaded artifact digest ($actual) does not match build's own computed digest ($EXPECTED_DIGEST) -- refusing to verify a possibly-corrupted or -tampered artifact." >&2
+            exit 1
+          fi
+          echo "confirmed: downloaded artifact digest matches build's computed digest ($actual)"
+          echo "confirmed: the complete OCI descriptor graph (manifest, config, every layer blob) re-validated successfully."
+        env:
+          EXPECTED_DIGEST: ${{ needs.build.outputs.image_digest }}
+
+      - name: Load the docker-format artifact for local inspection (never rebuild)
+        run: docker load -i /tmp/artifact/ingestion-api-docker.tar
+
+      - name: "Cryptographically prove the loaded docker-format archive is the same image as the published OCI archive (correction pass, item 3)"
+        # This workflow keeps two archive exports from one identical
+        # `docker buildx build` invocation: the OCI archive (authoritative
+        # for the digest `plan`/`deploy` use) and a docker-format archive
+        # (used only so real `docker inspect`/`docker run` commands can
+        # examine it below -- `crane`, an OCI-native registry tool, has no
+        # container-inspection capability). Never merely assumed
+        # equivalent because "they came from the same build": a locally
+        # loaded Docker image's own `docker inspect --format='{{.Id}}'`
+        # is exactly its config blob's digest, so comparing it against
+        # the OCI archive's own independently re-validated config digest
+        # cryptographically proves the two archives describe the
+        # identical image -- empirically confirmed identical for a real
+        # dual-export build during this correction pass.
+        run: |
+          image="ingestion-api:build-${COMMIT_SHA}"
+          docker_image_id="$(docker inspect --format='{{.Id}}' "$image")"
+          oci_config_digest="$(python3 scripts/extract_oci_digest.py /tmp/artifact/ingestion-api-oci.tar --field config_digest)"
+          if [ "$docker_image_id" != "$oci_config_digest" ]; then
+            echo "cross-format mismatch: docker-loaded image ID ($docker_image_id) does not equal the OCI archive's own config digest ($oci_config_digest) -- the two archives do not describe the same image." >&2
+            exit 1
+          fi
+          echo "confirmed: the docker-format archive and the published OCI archive describe the identical image (config digest $docker_image_id)."
+        env:
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+
+      - name: Image inspection -- non-root user, exec entrypoint, no dev tooling, migrations packaged
+        run: |
+          image="ingestion-api:build-${COMMIT_SHA}"
+          user="$(docker inspect --format='{{.Config.User}}' "$image")"
+          if [ "$user" != "10001:10001" ]; then
+            echo "expected non-root user 10001:10001, got: $user" >&2
+            exit 1
+          fi
+          entrypoint="$(docker inspect --format='{{json .Config.Entrypoint}}' "$image")"
+          if [ "$entrypoint" != '["python","-m","cloudops_guard.ingestion_azure.entrypoint"]' ]; then
+            echo "unexpected entrypoint: $entrypoint" >&2
+            exit 1
+          fi
+          docker run --rm --entrypoint python "$image" -c "
+          import importlib.util, sys
+          for mod in ('pytest', 'ruff'):
+              if importlib.util.find_spec(mod) is not None:
+                  print(f'unexpected dev tooling present: {mod}', file=sys.stderr)
+                  sys.exit(1)
+          import importlib.resources
+          names = sorted(p.name for p in (importlib.resources.files('cloudops_guard.ingestion_azure') / 'migrations').iterdir())
+          assert names, 'no migrations packaged'
+          print('migrations packaged:', names)
+          "
+        env:
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+
+      - name: "Dependency vulnerability scan against the installed image's actual package set (correction-pass item 1)"
+        # Previously scanned only a source-side `uv export` -- which
+        # proves nothing about what actually ended up installed in the
+        # image (a Dockerfile bug, a stale layer cache, or an
+        # un-pinned transitive re-resolution could each make the two
+        # diverge). Extracts the *installed* interpreter's own package
+        # set from the loaded image and scans that instead.
+        #
+        # Uses `importlib.metadata` (stdlib), never `pip list` -- the
+        # image's venv is `uv`-managed and genuinely has no `pip` module
+        # installed at all (confirmed directly: `docker run --entrypoint
+        # python <image> -m pip list` fails with "No module named pip").
+        run: |
+          image="ingestion-api:build-${COMMIT_SHA}"
+          docker run --rm --entrypoint python "$image" -c "
+          import importlib.metadata as m
+          for d in sorted(m.distributions(), key=lambda d: d.name.lower()):
+              print(f'{d.name}=={d.version}')
+          " > /tmp/installed-reqs.txt
+          cat /tmp/installed-reqs.txt
+          uvx pip-audit --strict -r /tmp/installed-reqs.txt
+        env:
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+
+      - name: "Compare the installed image's package set against uv.lock (correction-pass item 8)"
+        # Excludes `sys_platform == 'win32'`-only locked entries: this
+        # project's lock currently has exactly that one platform-marker
+        # shape (`tzdata`/`colorama`), correctly never installed in this
+        # Linux image -- a future platform-conditional dependency using a
+        # *different* marker would need this exclusion revisited.
+        run: |
+          # Normalizes each line to lowercase with `_` folded to `-`
+          # (PEP 503 canonical form) before comparing -- `uv export`
+          # already normalizes distribution names this way, but
+          # `importlib.metadata` reports a distribution's raw declared
+          # name verbatim (e.g. `typing_extensions`, `pydantic_core`),
+          # which is a benign spelling difference, never a real
+          # version/package mismatch.
+          uv export --locked --extra api --extra azure-production --no-dev --no-emit-project --no-hashes | \
+            grep -E "^[a-zA-Z0-9_.-]+==" | \
+            grep -v "sys_platform == 'win32'" | \
+            sed -E "s/ *;.*//" | tr 'A-Z_' 'a-z-' | sort > /tmp/locked-reqs.txt
+          grep -v "^cloudops[_-]guard==" /tmp/installed-reqs.txt | tr 'A-Z_' 'a-z-' | sort > /tmp/installed-reqs-sorted.txt
+          if ! diff -u /tmp/locked-reqs.txt /tmp/installed-reqs-sorted.txt; then
+            echo "the image's installed package set does not exactly match uv.lock -- the image is not genuinely locked." >&2
+            exit 1
+          fi
+          echo "installed image package set matches uv.lock exactly."
+
+      - name: "Secret scan across the exact checked-out tree (correction-pass items 1/9: fail-closed, never an always-empty diff range, never a blanket tests/ exclusion)"
+        # The previous version scanned `origin/main..$COMMIT_SHA`, which
+        # the `validate` job's own ancestor-of-main requirement makes
+        # *always empty* -- combined with `|| true`, doubly vacuous
+        # (never examined anything, and could never fail even if it
+        # had). Fixed by scanning the actual checked-out tree's tracked
+        # content directly, with no `|| true` anywhere.
+        #
+        # **Correction-pass item 9**: an earlier fix (above) excluded the
+        # *entire* `tests/` directory to avoid a false positive against
+        # this project's own deliberately-embedded secret-*shaped* test
+        # sentinel -- but that blanket exclusion would just as easily
+        # have hidden a real, accidentally-committed credential anywhere
+        # else in that same tree. `scripts/scan_for_secrets.py` replaces
+        # it with a narrow, exact, documented `(file, matched substring)`
+        # allowlist of just the two already-reviewed sentinel
+        # occurrences -- every other file, including every other test
+        # file, is fully scanned.
+        run: python3 scripts/scan_for_secrets.py
+
+      - name: "git diff --check against this commit's own parent (correction-pass item 1)"
+        # Same underlying vacuity as the secret scan: `origin/main..
+        # $COMMIT_SHA` is always empty. A full-tree check against the
+        # empty-tree hash was also tried and rejected -- this repository
+        # already has ~110 lines of pre-existing, unrelated trailing
+        # whitespace in a golden HTML test fixture, which would make a
+        # full-tree check permanently, uninformatively red. Diffing
+        # against this commit's own immediate parent is fail-closed and
+        # meaningful (it examines this reviewed commit's own real
+        # changes) without that false-positive noise.
+        run: |
+          if ! git rev-parse --verify "${COMMIT_SHA}^" >/dev/null 2>&1; then
+            echo "commit has no parent (initial commit) -- nothing to diff; this is safe, not a bypass."
+            exit 0
+          fi
+          git diff --check "${COMMIT_SHA}^" "${COMMIT_SHA}"
+        env:
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+
+  # Read-only: computes what would change, using a federated identity
+  # distinct from the deploy identity below -- never applies anything.
+  # Surfaced for the human approver to review before the protected-
+  # Environment gate in `deploy`.
+  #
+  # **`AZURE_PLAN_CLIENT_ID` must never be described as "Reader-scoped"
+  # or "read-only"** (corrected twice now -- an earlier correction pass
+  # already flagged Reader's own missing `whatIf/action` permission, but
+  # still under-stated what's actually required; this pass corrects that
+  # further). Microsoft's own documentation
+  # (https://learn.microsoft.com/en-us/azure/azure-resource-manager/
+  # templates/deploy-what-if#required-permissions) states plainly: "To
+  # deploy a Bicep file or ARM template, you need write access on the
+  # resources you're deploying and access to all operations on the
+  # Microsoft.Resources/deployments resource type... The what-if
+  # operation has the same permission requirements." There is no
+  # narrower "whatIf-only" permission -- What-If's own authorization
+  # check is identical to a real deployment's.
+  #
+  # This means the identity backing this variable **necessarily holds
+  # real write permissions** on every resource type `foundation.bicep`/
+  # `app.bicep` declare (including `Microsoft.Authorization/
+  # roleAssignments/write`, since `foundation.bicep` creates role
+  # assignments -- itself a sensitive, access-granting permission, not
+  # merely "can create a VNet") plus `Microsoft.Resources/deployments/*`
+  # and broad read (`*/read`) to diff against existing state. The
+  # *operation this identity is ever asked to perform* (`az deployment
+  # group what-if`) never mutates anything -- but the *identity itself*
+  # is unambiguously mutation-capable, not a narrow or read-only one.
+  # Given that, `ingestion-azure-plan`'s own GitHub Environment must be
+  # a genuinely **protected** stage (required reviewers), mirroring
+  # `production` below -- not the "no required reviewers, it's just a
+  # preview" posture an earlier version of this documentation described.
+  # See `docs/deployment/azure-ingestion-production.md` §9 for the
+  # complete, corrected custom-role definition. **Correction pass**:
+  # Phase 4G-B must validate this identity's own role assignment before
+  # its first real use, entirely through read-only means -- never by
+  # deliberately running `az deployment group create` under this
+  # identity "just to see if it works." A real deployment is performed
+  # only by the separately authorized `deploy` stage, using
+  # `AZURE_DEPLOY_CLIENT_ID`, never as a test of the plan identity. The
+  # actual validation procedure is: (1) inspect the real, live role
+  # assignment with a read-only command (`az role assignment list
+  # --assignee <plan-identity-principal-id> --scope <resource-group-id>
+  # -o json`) and confirm it matches the documented custom-role
+  # definition exactly; (2) run a real `az deployment group what-if`
+  # under this identity against both templates and confirm it succeeds.
+  # Both steps are non-mutating; neither ever runs `az deployment group
+  # create`/`az deployment group what-if --confirm-with-what-if` under
+  # this identity.
+  #
+  # **Correction-pass item 2**: previously planned only `foundation.bicep`
+  # while `deploy` applied `app.bicep` -- meaning the protected-environment
+  # approver was never actually reviewing the change being applied. Now
+  # runs `app.bicep`'s own what-if against the exact ephemeral parameter
+  # file (real foundation outputs, `build`'s own locally-computed, never-
+  # yet-published digest) that `deploy` will later publish and apply
+  # verbatim -- retained as a workflow artifact so there is no way for
+  # the two to diverge. The foundation what-if below is a separate,
+  # informational, rare-change preview only (see this file's own
+  # top-of-file comment); foundation is provisioned manually, out of
+  # band, per docs/deployment/azure-ingestion-production.md.
+  plan:
+    name: Plan (read-only, no mutation)
+    needs: [validate, build, verify]
+    if: github.event.inputs.action != 'rollback'
+    runs-on: ubuntu-latest
+    environment: ingestion-azure-plan
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Azure login (OIDC/workload identity federation -- no client secret)
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ vars.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "Foundation what-if (separate, informational, rare-change preview only)"
+        # Correction-pass item 10: `budgetStartDate` is computed here,
+        # fresh, as the first day of the *current* UTC month -- never
+        # read from a checked-in constant, which would eventually fall
+        # outside Azure's required current-time-grain-period window.
+        run: |
+          budget_start_date="$(date -u +%Y-%m-01)"
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/foundation.bicep \
+            --parameters infra/azure/foundation.bicepparam \
+            --parameters namePrefix="$NAME_PREFIX" globalSuffix="$GLOBAL_SUFFIX" tenantId="$AZURE_TENANT_ID" postgresAdministratorPassword="$POSTGRES_ADMIN_PASSWORD_PLACEHOLDER_NEVER_LOGGED" budgetStartDate="$budget_start_date" \
+            --no-pretty-print > /tmp/foundation-plan.txt
+          cat /tmp/foundation-plan.txt
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+          GLOBAL_SUFFIX: ${{ vars.COG_GLOBAL_SUFFIX }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          POSTGRES_ADMIN_PASSWORD_PLACEHOLDER_NEVER_LOGGED: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+
+      - name: "Generate the real application-deployment parameter file (never infra/azure/app.bicepparam)"
+        # Correction pass, item 3: `IMAGE_REF` is built from `build`'s own
+        # pre-push, locally-computed digest -- never from a push this
+        # (deliberately non-mutating) job never performs. `deploy` below
+        # computes the identical `<registry>/cloudops-guard-ingestion-api
+        # @<digest>` string using the same formula, then independently
+        # verifies the digest it actually publishes matches this one
+        # exactly -- so the reference `plan` reviews here and the
+        # reference `deploy` eventually publishes can never diverge.
+        run: |
+          python3 scripts/generate_app_deployment_params.py \
+            --resource-group "$RESOURCE_GROUP" \
+            --foundation-deployment-name "$FOUNDATION_DEPLOYMENT_NAME" \
+            --name-prefix "$NAME_PREFIX" \
+            --image-ref "${ACR_LOGIN_SERVER}/cloudops-guard-ingestion-api@${IMAGE_DIGEST}" \
+            --alert-email-address "$ALERT_EMAIL_ADDRESS" \
+            --output-path /tmp/app-deployment-params.json
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          FOUNDATION_DEPLOYMENT_NAME: ${{ vars.COG_FOUNDATION_DEPLOYMENT_NAME }}
+          NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+          ACR_LOGIN_SERVER: ${{ vars.COG_ACR_LOGIN_SERVER }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.image_digest }}
+          ALERT_EMAIL_ADDRESS: ${{ vars.COG_ALERT_EMAIL_ADDRESS }}
+
+      - name: "Application what-if -- the exact template, parameters, and image reference deploy will apply"
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/app.bicep \
+            --parameters @/tmp/app-deployment-params.json \
+            --no-pretty-print > /tmp/app-plan.txt
+          cat /tmp/app-plan.txt
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+      - name: Retain the plan and the exact parameter file for human review and for deploy to reuse verbatim
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: application-plan
+          path: |
+            /tmp/foundation-plan.txt
+            /tmp/app-plan.txt
+            /tmp/app-deployment-params.json
+          retention-days: 14
+
+  # The only job with write/deploy Azure credentials -- gated on every
+  # job above succeeding, and on the protected `production` GitHub
+  # Environment's own approval/reviewer requirements (a reviewer other
+  # than the initiator, self-review prevented -- documented, not
+  # enforceable from this file itself; see
+  # docs/deployment/azure-ingestion-production.md).
+  deploy:
+    name: Deploy or roll back
+    needs: [validate, build, verify, plan]
+    if: always() && needs.validate.result == 'success' && (github.event.inputs.action == 'deploy' || github.event.inputs.action == 'rollback') && (github.event.inputs.action == 'rollback' || needs.verify.result == 'success') && (github.event.inputs.action == 'rollback' || needs.plan.result == 'success')
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Azure login (OIDC/workload identity federation -- no client secret, no long-lived key)
+        # Correction pass, item 3: this identity now also needs AcrPush
+        # on the one registry (documented in `docs/deployment/
+        # azure-ingestion-production.md`) -- it is the only job in this
+        # entire workflow that ever publishes an image, and it does so
+        # only after `verify`/`plan` have both succeeded and this job's
+        # own protected `production` Environment approval has been
+        # granted.
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: "Download the exact build artifact (deploy action only): the same OCI archive verify already inspected -- never rebuilt"
+        if: github.event.inputs.action == 'deploy'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ingestion-api-image
+          path: /tmp/artifact
+
+      - name: "Install a pinned, checksum-verified, OCI-native registry tool (deploy action only)"
+        # Correction pass, item 3: `docker push` re-wraps a manifest into
+        # Docker's own legacy Distribution schema rather than preserving
+        # the OCI manifest byte-for-byte -- independently, empirically
+        # confirmed during this correction pass (a real `docker push` to
+        # a real local registry produced a *different* digest than the
+        # one computed directly from the same build's own OCI archive).
+        # `crane` (an OCI-native registry tool) preserves the manifest
+        # exactly -- confirmed the resulting registry digest matched the
+        # pre-computed one exactly, pushing the identical archive to a
+        # real local registry.
+        #
+        # **Correction pass, item 2**: pinning only the URL/version is
+        # insufficient integrity verification -- mirrors the Bicep CLI
+        # install step's own checksum pin. `CRANE_SHA256` below is the
+        # real SHA-256 of `go-containerregistry_Linux_x86_64.tar.gz` for
+        # the exact version pinned, independently computed from the real
+        # GitHub release on 2026-09-10 (`shasum -a 256` against a fresh
+        # download) and cross-checked against that release's own
+        # published `checksums.txt`. Download failure, checksum
+        # mismatch, or extraction failure below all fail closed.
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          curl -sSL -o /tmp/crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          actual_sha256="$(sha256sum /tmp/crane.tar.gz | cut -d' ' -f1)"
+          if [ "$actual_sha256" != "$CRANE_SHA256" ]; then
+            echo "crane release checksum mismatch: expected $CRANE_SHA256, got $actual_sha256 -- refusing to extract or execute a binary that does not match the independently pinned, verified checksum." >&2
+            exit 1
+          fi
+          tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane
+          installed_version="$(crane version)"
+          if [ "$installed_version" != "$CRANE_VERSION" ]; then
+            echo "crane version mismatch after install: expected $CRANE_VERSION, got $installed_version -- refusing to proceed." >&2
+            exit 1
+          fi
+          echo "confirmed: crane $installed_version installed and checksum-verified."
+        env:
+          CRANE_VERSION: "0.22.1"
+          CRANE_SHA256: "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
+
+      - name: "Extract the verified OCI archive to a real OCI layout directory (deploy action only)"
+        # **Correction pass, item 2 (original)**: `crane push` documents
+        # that a directory argument is treated as an OCI image layout,
+        # while a *file* argument is always assumed to be a Docker-format
+        # tarball (https://github.com/google/go-containerregistry/blob/
+        # main/cmd/crane/doc/crane_push.md) -- passing the bare OCI
+        # archive tar directly (an earlier version of this step) was
+        # reproduced during that correction pass to fail outright:
+        # `Error: loading ingestion-api-oci.tar as tarball: file
+        # manifest.json not found in tar` (a real OCI archive has no
+        # such file).
+        #
+        # **Correction pass, item 3 (this pass)**: the previous fix still
+        # ran a generic, unrestricted `tar -xf` into that directory after
+        # validating the archive separately -- two distinct operations
+        # against the same file, which is exactly the shape a validate/
+        # extract TOCTOU gap takes, and `tar -xf` itself extracts
+        # whatever the archive contains regardless of member type/path.
+        # `scripts/extract_oci_digest.py --extract-to` now performs both
+        # in one Python invocation, one open tar handle: it validates the
+        # complete descriptor graph *and* the complete permitted OCI
+        # layout envelope (rejecting any symlink/hardlink/device/FIFO/
+        # unsafe path/unexpected member anywhere in the archive, not only
+        # at the paths it reads), then extracts only the exact validated
+        # member set into a freshly created (never pre-existing)
+        # directory -- never a separate, unrestricted extraction step.
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          python3 scripts/extract_oci_digest.py /tmp/artifact/ingestion-api-oci.tar \
+            --expected-os linux --expected-architecture amd64 \
+            --extract-to /tmp/oci-layout
+          test -f /tmp/oci-layout/oci-layout
+          test -f /tmp/oci-layout/index.json
+          test -d /tmp/oci-layout/blobs
+          echo "confirmed: safely extracted a valid OCI layout directory at /tmp/oci-layout."
+
+      - name: "Publish the exact verified artifact by digest -- the ONLY mutating registry write in this entire workflow (deploy action only)"
+        # **Correction pass, item 7**: a digest mismatch detected below
+        # is caught *after* `crane push` has already written to ACR --
+        # by that point the registry has already received the blobs and
+        # a manifest under the `build-${COMMIT_SHA}` tag. "Refusing to
+        # proceed" means this job does not continue to apply
+        # `app.bicep` -- it does **not** mean ACR is left unchanged.
+        # This should be structurally impossible (the same, just-
+        # verified OCI layout directory is what was just pushed) and no
+        # occurrence has ever been observed, but if it ever fires, the
+        # orphaned tag/manifest requires an audited manual cleanup
+        # (`az acr repository delete --image
+        # cloudops-guard-ingestion-api:build-<sha>`, run by an operator,
+        # never by this workflow) -- this workflow's own deploy identity
+        # deliberately never holds `AcrDelete` (only `AcrPush`), so it
+        # cannot perform that cleanup itself, and never will without a
+        # separate, deliberate widening of its permissions.
+        if: github.event.inputs.action == 'deploy'
+        run: |
+          az acr login --name "$ACR_NAME"
+          registry_ref="${ACR_LOGIN_SERVER}/cloudops-guard-ingestion-api:build-${COMMIT_SHA}"
+          crane push --image-refs /tmp/published-ref.txt /tmp/oci-layout "$registry_ref"
+          published_ref="$(cat /tmp/published-ref.txt)"
+          published_digest="${published_ref#*@}"
+          echo "published: $published_ref"
+          if [ "$published_digest" != "$EXPECTED_DIGEST" ]; then
+            echo "PUBLISHED DIGEST MISMATCH: published '$published_digest' but plan reviewed '$EXPECTED_DIGEST'. ACR has ALREADY been mutated (the push above already completed) -- this refusal only stops this job from applying app.bicep against the wrong image. The orphaned '$registry_ref' tag/manifest requires manual, audited cleanup by an operator holding AcrDelete (this workflow's identity does not); investigate immediately -- this should be structurally impossible." >&2
+            exit 1
+          fi
+          echo "confirmed: published digest exactly matches the digest plan reviewed ($published_digest)"
+        env:
+          ACR_NAME: ${{ vars.COG_ACR_NAME }}
+          ACR_LOGIN_SERVER: ${{ vars.COG_ACR_LOGIN_SERVER }}
+          COMMIT_SHA: ${{ needs.validate.outputs.commit_sha }}
+          EXPECTED_DIGEST: ${{ needs.build.outputs.image_digest }}
+
+      - name: "Download the exact plan artifact (deploy action): applies verbatim what plan already reviewed"
+        if: github.event.inputs.action == 'deploy'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: application-plan
+          path: /tmp/plan
+
+      - name: "Use the plan's own parameter file unmodified (deploy action)"
+        if: github.event.inputs.action == 'deploy'
+        run: cp /tmp/plan/app-deployment-params.json /tmp/app-deployment-params.json
+
+      - name: "Generate the rollback parameter file (rollback action only -- never ran through plan)"
+        # Rollback re-applies an already-built, already-verified,
+        # already-once-deployed digest -- `build`/`verify`/`plan` are all
+        # skipped for this action (nothing new to build or review), so
+        # there is no earlier plan artifact to reuse. This still goes
+        # through the exact same validated-sources-only generator as the
+        # `deploy` action -- never the checked-in app.bicepparam.
+        if: github.event.inputs.action == 'rollback'
+        run: |
+          python3 scripts/generate_app_deployment_params.py \
+            --resource-group "$RESOURCE_GROUP" \
+            --foundation-deployment-name "$FOUNDATION_DEPLOYMENT_NAME" \
+            --name-prefix "$NAME_PREFIX" \
+            --image-ref "${ACR_LOGIN_SERVER}/cloudops-guard-ingestion-api@${ROLLBACK_DIGEST}" \
+            --alert-email-address "$ALERT_EMAIL_ADDRESS" \
+            --output-path /tmp/app-deployment-params.json
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          FOUNDATION_DEPLOYMENT_NAME: ${{ vars.COG_FOUNDATION_DEPLOYMENT_NAME }}
+          NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+          ACR_LOGIN_SERVER: ${{ vars.COG_ACR_LOGIN_SERVER }}
+          ROLLBACK_DIGEST: ${{ github.event.inputs.rollback_image_digest }}
+          ALERT_EMAIL_ADDRESS: ${{ vars.COG_ALERT_EMAIL_ADDRESS }}
+
+      - name: "Stage 1: apply the migrate job only (deployTraffic=false) -- never the traffic-facing Container App or the scheduled operator jobs"
+        # Correction-pass item 1 (narrowed further in a later pass):
+        # migration compatibility must be established *before* the
+        # candidate image reaches anything traffic-facing OR
+        # schedule-driven. `app.bicep`'s `deployTraffic` parameter
+        # (default `true`) now gates three things, not one:
+        # `container-app` (traffic-facing), `monitoring` (its alerts),
+        # and `scheduledJobs` (the automatically-scheduled
+        # retention-sweep/purge-sweep/limiter-cleanup jobs -- an earlier
+        # version of this split left these three inside the always-on
+        # `jobs` module, meaning this very stage would have silently
+        # repointed their cron-triggered images at an as-yet-unverified
+        # candidate). Only `jobs` (the `migrate` job -- manual-trigger
+        # only, never scheduled) is deployed here; `deployTraffic=false`
+        # keeps `container-app`/`monitoring`/`scheduledJobs` entirely
+        # undeployed until Stage 2 below, after the gate passes. Uses the
+        # exact same parameters file `plan` already reviewed (or, for
+        # rollback, the one just generated above) -- only the
+        # `deployTraffic` override differs between this stage and Stage 2.
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/app.bicep \
+            --parameters @/tmp/app-deployment-params.json \
+            --parameters deployTraffic=false
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+      - name: "Migration/compatibility gate: structurally validate the migrate job's own migration-status output"
+        # Correction-pass item 1. Dispatches the manual-trigger-only
+        # `migrate` Container Apps Job (now pointing at this candidate's
+        # own image, per Stage 1 above) with its configured default
+        # command -- the safe, read-only `migration-status` -- and hands
+        # the exact execution name it started to `scripts/
+        # check_migration_compatibility.py`, which structurally parses
+        # (never greps) the real `packaged_versions`/`applied_versions`/
+        # `pending_versions`/`drifted_versions`/`unexpected_applied_
+        # versions`/`up_to_date` JSON shape `migration_status()` actually
+        # produces, correlated to this exact execution via the
+        # `execution_name` field `ops_cli.py migration-status` now
+        # embeds. Runs for **both** `deploy` and `rollback` -- a rollback
+        # target's own `unexpected_applied_versions` check is exactly
+        # what catches "this older image doesn't understand a migration
+        # a newer, already-deployed image already applied."
+        #
+        # HONEST CAVEAT (this correction pass never provisions or
+        # deploys anything real, per its own constraints): the exact
+        # `az containerapp job execution list` JSON shape and the
+        # `ContainerAppConsoleLogs_CL` Log Analytics table/column names
+        # this script queries reflect Azure's documented conventions as
+        # of this pass, but have never been exercised against a real
+        # Azure subscription. The first real Phase 4G-B dispatch must
+        # treat this script's exact query syntax as unverified and be
+        # prepared to adjust it against the real API responses.
+        run: |
+          job_name="${COG_NAME_PREFIX}-migrate"
+          execution_name="$(az containerapp job start --name "$job_name" --resource-group "$RESOURCE_GROUP" --query name -o tsv)"
+          echo "started migration-status execution: $execution_name"
+          python3 scripts/check_migration_compatibility.py \
+            --job-name "$job_name" \
+            --resource-group "$RESOURCE_GROUP" \
+            --execution-name "$execution_name" \
+            --log-analytics-workspace-id "$LOG_ANALYTICS_WORKSPACE_ID"
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          COG_NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+          LOG_ANALYTICS_WORKSPACE_ID: ${{ vars.COG_LOG_ANALYTICS_WORKSPACE_ID }}
+
+      - name: "Stage 2: apply the full application deployment (deployTraffic=true) -- only now, gate passed"
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/app.bicep \
+            --parameters @/tmp/app-deployment-params.json
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+      - name: Post-deployment health verification (GET /api/v1/capabilities)
+        id: healthcheck
+        run: |
+          fqdn="$(az containerapp show --name "${COG_NAME_PREFIX}-api" --resource-group "$RESOURCE_GROUP" --query 'properties.configuration.ingress.fqdn' -o tsv)"
+          status="$(curl -s -o /tmp/capabilities-response.json -w '%{http_code}' "https://${fqdn}/api/v1/capabilities")"
+          echo "HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            echo "post-deployment health check failed -- stopping, never 'deploy anyway'." >&2
+            exit 1
+          fi
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          COG_NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+
+      - name: "Synthetic-only smoke test (upload/get/delete, dedicated smoke tenant)"
+        if: github.event.inputs.action == 'deploy'
+        # Uses a separately-provisioned smoke-test token, scoped to a
+        # non-production-data tenant (out-of-band provisioned, task 10) --
+        # never a real customer token, never a real customer report, and
+        # the token value is never printed or logged.
+        #
+        # Correction-pass item 1: the smoke payload previously posted here
+        # (`{"findings":[],"summary":{"total":0}}`) was reproduced during
+        # this pass to fail the real server-side validation the released
+        # `AuditReport` contract requires -- missing `cluster_context`/
+        # `namespace_filter`/`generated_at`, and a `summary.total` key
+        # that does not exist on the real model (`total` is a computed
+        # property, never a real field) -- so the deployed API would
+        # return `400 invalid_report`, not the `201` this step's own
+        # assertion expected, meaning the POST/GET/DELETE path below had
+        # never actually been exercised by a genuinely valid payload.
+        # Fixed by generating the payload from `scripts/
+        # smoke_test_payload.py`, the same single source of truth this
+        # pass's own behavioral test
+        # (`tests/test_smoke_test_payload.py`) uses -- a fresh
+        # `generated_at` on every invocation, so a repeated smoke run
+        # never collides with a prior run's own `report_fingerprint`.
+        #
+        # **Correction pass, item 2**: GitHub Actions runs every `run:`
+        # step as `bash --noprofile --norc -eo pipefail {0}` by default --
+        # under that real shell behavior, a *nonzero `curl` process exit*
+        # (a transport failure/timeout, not merely a non-2xx HTTP status)
+        # inside a bare `x="$(curl ...)"` command substitution terminates
+        # the script immediately, exactly like any other failing command
+        # under `set -e`. Reproduced directly: extracted this step's own
+        # prior script, ran it under a real `bash -e -o pipefail` against
+        # a fake `curl` where POST succeeded (201) but GET exited 7 (a
+        # real curl transport-failure exit code) -- the script exited 7
+        # immediately, and `DELETE` was never invoked at all, permanently
+        # orphaning the record POST had already created. The project's
+        # own prior test for this step used plain `bash -c` (no `-e`),
+        # which does not reproduce this shell behavior at all.
+        #
+        # Fixed with a real `trap ... EXIT`-based cleanup, the bash
+        # equivalent of try/finally: once POST succeeds and a real
+        # ingestion ID is obtained, `CLEANUP_NEEDED=1` is set *before* GET
+        # ever runs, and the `cleanup` function -- registered on the
+        # `EXIT` trap from the very top of this script, so it fires on
+        # *every* exit path (an explicit `exit 1`, a `set -e`-triggered
+        # exit, or a normal fall-through at the end) -- always attempts
+        # `DELETE` when cleanup was armed. `curl`'s own process exit code
+        # is captured and checked separately from its `%{http_code}` HTTP
+        # status for POST, GET, *and* DELETE (`set +e`/`set -e` bracket
+        # only each individual curl invocation, never the whole step); a
+        # DELETE transport failure or non-200 status during cleanup
+        # itself upgrades an otherwise-successful run to a failure
+        # (`primary_exit` starts at whatever the script was already
+        # exiting with, and is only ever promoted from `0`, never
+        # silently downgraded from a real earlier failure) -- so the
+        # *original* failure reason is always what a reader sees first,
+        # with any cleanup-specific failure reported afterward, generically
+        # (never a distinguishing exit code of its own). A real, controlled
+        # post-GET assertion (the GET response's own `ingestion_id` must
+        # match the one POST returned) is included as a genuine integrity
+        # check, and also exercises the trap for a failure that is
+        # neither a curl transport failure nor a non-2xx status. Every
+        # `curl` call
+        # carries explicit `--connect-timeout`/`--max-time` bounds, so a
+        # hung request can never block this step indefinitely. Still never
+        # prints the token, the `Authorization` header, any response
+        # body, the report content, or the ingestion ID.
+        #
+        # **Sixth pass, log-truthfulness correction**: the step previously
+        # printed "synthetic smoke test passed" immediately after the
+        # post-GET integrity check succeeded -- *before* the `EXIT` trap's
+        # `cleanup` function ever ran `DELETE`. Reproduced directly: with a
+        # fake `curl` returning a 500 on `DELETE` only, the script's own
+        # exit code was correctly nonzero (1), but its **stdout still
+        # contained the literal "synthetic smoke test passed" line** --
+        # meaning a reader of the logs alone (rather than the job's actual
+        # exit status) could be misled into believing the smoke test fully
+        # succeeded even though cleanup, and therefore the overall step,
+        # had failed. Fixed by extracting the `DELETE` logic into
+        # `attempt_delete` (returns 0/1 and sets `DELETE_DONE=1` so it is
+        # never invoked twice), calling it *explicitly* on the success
+        # path immediately after the integrity check -- before the success
+        # message is ever printed -- and exiting 1 without printing
+        # anything further if that explicit call fails. The `EXIT` trap's
+        # `cleanup` function is unchanged as the guaranteed fallback for
+        # every *other* exit path (an early POST/GET failure, a transport
+        # error, a timeout, or an assertion failure) -- it now simply
+        # skips its own `DELETE` attempt when `DELETE_DONE=1` already shows
+        # the explicit call handled it, so `DELETE` is still attempted
+        # exactly once on every path, never zero times and never twice.
+        run: |
+          fqdn="$(az containerapp show --name "${COG_NAME_PREFIX}-api" --resource-group "$RESOURCE_GROUP" --query 'properties.configuration.ingress.fqdn' -o tsv)"
+          base="https://${fqdn}/api/v1"
+          auth_header="Authorization: Bearer ${SMOKE_TOKEN}"
+          payload="$(python3 scripts/smoke_test_payload.py)"
+
+          CLEANUP_NEEDED=0
+          INGESTION_ID=""
+          DELETE_DONE=0
+
+          attempt_delete() {
+            set +e
+            delete_status="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 -X DELETE "${base}/reports/${INGESTION_ID}" -H "$auth_header")"
+            delete_curl_exit=$?
+            set -e
+            DELETE_DONE=1
+            if [ "$delete_curl_exit" != "0" ]; then
+              echo "smoke cleanup: DELETE transport failure (curl exit $delete_curl_exit)" >&2
+              return 1
+            elif [ "$delete_status" != "200" ]; then
+              echo "smoke cleanup: DELETE failed (status $delete_status)" >&2
+              return 1
+            fi
+            return 0
+          }
+
+          cleanup() {
+            local primary_exit=$?
+            if [ "$CLEANUP_NEEDED" = "1" ] && [ -n "$INGESTION_ID" ] && [ "$DELETE_DONE" = "0" ]; then
+              if ! attempt_delete; then
+                if [ "$primary_exit" = "0" ]; then primary_exit=1; fi
+              fi
+            fi
+            exit "$primary_exit"
+          }
+          trap cleanup EXIT
+
+          set +e
+          post_status="$(curl -s -o /tmp/smoke-post.json -w '%{http_code}' --connect-timeout 10 --max-time 30 -X POST "${base}/reports" \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "$payload")"
+          post_curl_exit=$?
+          set -e
+          if [ "$post_curl_exit" != "0" ]; then
+            echo "smoke POST transport failure (curl exit $post_curl_exit)" >&2
+            exit 1
+          fi
+          if [ "$post_status" != "201" ]; then
+            echo "smoke POST failed (status $post_status)" >&2
+            exit 1
+          fi
+          INGESTION_ID="$(python3 -c "import json; print(json.load(open('/tmp/smoke-post.json'))['ingestion_id'])")"
+          CLEANUP_NEEDED=1
+
+          set +e
+          get_status="$(curl -s -o /tmp/smoke-get.json -w '%{http_code}' --connect-timeout 10 --max-time 30 "${base}/reports/${INGESTION_ID}" -H "$auth_header")"
+          get_curl_exit=$?
+          set -e
+          if [ "$get_curl_exit" != "0" ]; then
+            echo "smoke GET transport failure (curl exit $get_curl_exit)" >&2
+            exit 1
+          fi
+          if [ "$get_status" != "200" ]; then
+            echo "smoke GET failed (status $get_status)" >&2
+            exit 1
+          fi
+          get_ingestion_id="$(python3 -c "import json; print(json.load(open('/tmp/smoke-get.json'))['ingestion_id'])")"
+          if [ "$get_ingestion_id" != "$INGESTION_ID" ]; then
+            echo "smoke GET returned a mismatched ingestion_id (response integrity check failed)" >&2
+            exit 1
+          fi
+
+          if ! attempt_delete; then
+            exit 1
+          fi
+
+          echo "synthetic smoke test passed (ingestion_id, token, and report content never printed)"
+        env:
+          SMOKE_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          COG_NAME_PREFIX: ${{ vars.COG_NAME_PREFIX }}
+
+      - name: Record deployment outcome in the audit trail
+        if: always()
+        run: |
+          echo "actor=${{ github.actor }}"
+          echo "commit_sha=${{ needs.validate.outputs.commit_sha }}"
+          echo "action=${{ github.event.inputs.action }}"
+          echo "region=canadacentral"
+          echo "health_check_status=${{ steps.healthcheck.outcome }}"
+          echo "final_status=${{ job.status }}"

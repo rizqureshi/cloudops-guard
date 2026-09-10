@@ -12,31 +12,73 @@ itself** that authorization."
 
 ## Preconditions to authorizing Phase 4G at all
 
-**The two items below are not Phase 4G activities. They are
+**The three items below are not Phase 4G activities. They are
 prerequisites that must already be satisfied before Phase 4G may be
 authorized to begin — Phase 4G executes a decision already made, it
 does not make the decision itself.** Every item in "Phase 4G execution
-checklist" below presupposes both of these are already done.
+checklist" below presupposes all three of these are already done.
 
-- [ ] **Provider and region/data-residency decision** — a separate,
-  explicit human decision naming the actual cloud provider and region
-  for every store, service, and backup. `docs/deployment/
-  ingestion-production.md` §3 and §8 explicitly defer this decision to
-  the user; it is not implied or satisfied by approving that document's
-  architecture-*pattern* recommendation, and it is not something Phase
-  4G selects on its own once started.
-- [ ] **Provider-specific cost estimate and budget approval** — a real,
-  numerical cost estimate priced against the *actually-selected*
-  provider's current published rates for the pilot's expected traffic,
-  reviewed and explicitly approved by the user. `docs/deployment/
-  ingestion-production.md` §3's cost comparisons are qualitative only
-  and are never a substitute for this. This step is itself gated on the
-  provider/region decision immediately above — it cannot happen first.
+- [x] **Provider and region/data-residency decision** — **recorded
+  2026-09-09**: Microsoft Azure, Canada Central (`canadacentral`). Every
+  data-bearing resource Phase 4G-A's own infrastructure-as-code defines
+  (`infra/azure/`) is hard-coded to this region — see `docs/deployment/
+  azure-ingestion-production.md` §0. This decision was made and recorded
+  by the user, never selected by this document, `docs/deployment/
+  ingestion-production.md`, or any automated process.
+- [ ] **Provider-specific cost estimate and budget approval** —
+  **UNRESOLVED as of this correction pass (2026-09-10).** The figure
+  originally recorded here (~CAD $46–72/month) was superseded by a
+  corrected, unit-priced recalculation
+  (`docs/deployment/azure-ingestion-production.md` §5) that includes two
+  cost sources the original estimate omitted entirely: the Key Vault
+  private endpoint (correction-pass item 4) and the managed-networking
+  resources Azure documents as an additional charge for a custom-VNet
+  Container Apps environment (correction-pass item 4's workload-profiles
+  switch). **The corrected range is ~CAD $58–124/month — its upper bound
+  exceeds the recorded CAD $100/month alerting ceiling by roughly 24%.**
+  This box is unchecked, not because the region/provider decision is in
+  doubt (it isn't — see the box above), but because the specific,
+  numerical cost/budget precondition this box exists to record is no
+  longer accurate and has not been re-approved. **`infra/azure/modules/
+  budget.bicep`'s `monthlyAmount` remains unchanged at 100** — this
+  correction pass does not alter a Recorded human decision on its own
+  authority. Phase 4G-B remains blocked until a human makes one of the
+  two decisions §5 itself names: (a) approve a revised budget ceiling
+  with adequate margin above the corrected $124/month worst case, or (b)
+  approve a redesigned, lower-cost architecture after reviewing the
+  security trade-offs that redesign would mean giving up (the private
+  Key Vault endpoint and/or the workload-profiles Container Apps
+  environment this same correction pass added). Neither decision is this
+  document's, or any automated process's, to make.
+- [ ] **Private Key Vault operator-access mechanism decision** —
+  **UNRESOLVED as of this correction pass (2026-09-10).**
+  `infra/azure/modules/keyvault.bicep` sets `publicNetworkAccess:
+  'Disabled'`, reachable only through its own private endpoint inside
+  the VNet — by design, and not something this pass proposes changing.
+  That design means §9 step 5's own `az keyvault secret set` secret-
+  population command is **not reachable** from an ordinary engineer's
+  laptop or an ordinary GitHub-hosted Actions runner, and this pass
+  found no already-approved execution environment inside the trusted
+  network boundary that could run it. `docs/deployment/
+  azure-ingestion-production.md` §9 step 5 compares three candidate
+  options (a hardened ephemeral in-VNet operator VM, an approved private
+  self-hosted GitHub Actions runner, or an explicitly approved private-
+  connectivity path such as an existing VPN/Bastion session), with their
+  respective RBAC scope, logging/audit, teardown, secret-handling, and
+  cost implications — **a human must choose one (or a documented
+  alternative) before Phase 4G-B can populate a single real secret
+  value.** This pass does not provision, silently select, or default to
+  any of them, and does **not** temporarily enable public Key Vault
+  access as a workaround.
 
-**Only once both boxes above are checked may a Phase 4G authorization
-request be considered at all.** The checklist below is what Phase 4G
-itself must then still do, execution steps within an already-authorized
-phase — not further preconditions to authorizing it.
+**The provider/region decision above remains valid and checked. The
+cost/budget precondition and the private Key Vault operator-access
+decision are not — a Phase 4G authorization request cannot yet be
+considered until both are re-resolved.** This does **not** authorize
+Phase 4G-B's own execution even once all three boxes are eventually
+checked: the checklist below is what Phase 4G itself must still do,
+execution steps within an already-authorized phase, never automatically
+satisfied by the decisions above.
 
 ## Phase 4G execution checklist
 
@@ -89,26 +131,67 @@ phase — not further preconditions to authorizing it.
 **None of the above provisions anything, deploys anything, or
 authorizes any item in the unchecked list above.**
 
+## What Phase 4G-A actually completed (for context, not authorization)
+
+- Real Azure production adapters (`src/cloudops_guard/ingestion_azure/`),
+  a hardened container image (`Dockerfile`), modular Bicep
+  infrastructure-as-code (`infra/azure/`), and a manual-dispatch-only
+  deployment/rollback workflow (`.github/workflows/
+  deploy-ingestion-azure.yml`) — see `docs/deployment/
+  azure-ingestion-production.md` for the complete description.
+- The provider/region decision (checked above) and a real, numerical
+  cost estimate — since corrected by a later pass to ~CAD $58–124/month
+  and **no longer checked above**, pending a human re-decision on the
+  budget ceiling or the architecture (see that precondition's own entry
+  for the full explanation).
+- **Phase 4G-A creates no Azure resource, reads no real credential, and
+  contacts no live Azure subscription.** Every adapter/container/
+  Bicep template was tested against local, offline stand-ins only (a
+  real PostgreSQL container, a real local Azurite emulator) — never a
+  real Azure account. The deployment workflow itself was authored and
+  validated (`actionlint`, real YAML parsing) but never dispatched.
+- **No endpoint is live. No token exists. No customer data has been
+  uploaded. The static website (`web/`) remains a wholly separate
+  service, unaffected by any of this.**
+
 ## Required before any box in the execution checklist may be checked
 
-**This list presupposes both preconditions above (provider/region,
-cost/budget) are already satisfied — it does not re-decide them.**
+**This list presupposes the provider/region precondition above is
+already satisfied — it does not re-decide it. The cost/budget
+precondition is currently unresolved (see its own entry above); nothing
+in this execution checklist may be authorized until it is re-resolved,
+in addition to whatever separate approvals the items below name.**
 
 1. A separate, explicit human decision to provision each specific
    resource, made with full awareness of its cost and operational
-   commitment.
+   commitment. **Still required — not satisfied by Phase 4G-A**, which
+   implemented deployable code and infrastructure-as-code but created no
+   resource (`docs/deployment/azure-ingestion-production.md` §1).
 2. Real adapter implementations for `MetadataStore`/`ReportBlobStore`/
    `TokenStore`/`AttemptLimiter`/`RequestRateLimiter` against the
-   chosen provider's actual products — none exist yet (only the
-   in-memory reference implementations, Phase 4B).
+   chosen provider's actual products. **Implemented in Phase 4G-A**
+   (`src/cloudops_guard/ingestion_azure/`) and tested against a real,
+   local PostgreSQL instance and a real, local Azurite emulator — never
+   against a real Azure subscription. Managed-identity authentication to
+   Blob Storage in particular remains unverified against live Azure
+   (`docs/deployment/azure-ingestion-production.md` §8/§11).
 3. A production entrypoint that constructs a real `IngestionApiConfig`
    and calls `production_readiness.validate_production_config` before
-   accepting any request — does not exist yet.
-4. A completed disaster-recovery runbook (`docs/deployment/
-   ingestion-production.md` §10 names this as a known blocker).
+   accepting any request. **Implemented in Phase 4G-A**
+   (`src/cloudops_guard/ingestion_azure/entrypoint.py`) and proven, in a
+   real local container, to fail closed without configuration and to
+   open real PostgreSQL connections and serve `GET /api/v1/capabilities`
+   correctly when configured — never run against real Azure
+   infrastructure.
+4. A completed disaster-recovery runbook. **Drafted in Phase 4G-A**
+   (`docs/deployment/azure-ingestion-production.md` §7: RPO 24h, RTO 8h,
+   a restore-test procedure) but **the restore drill itself has not been
+   executed** — this remains a hard blocker until it has.
 5. A completed monitoring/support-ownership plan
    (`docs/pilots/ingestion-pilot-runbook.md` §12 names this as not yet
-   defined).
+   defined). **Alerting infrastructure exists** (`infra/azure/modules/
+   monitoring.bicep`) but is not deployed, and the on-call recipient
+   address is still a placeholder.
 6. A specific pilot customer's written, informed consent
    (`docs/pilots/ingestion-pilot-runbook.md` §2).
 7. An audited, tenant-scoped, operator-only ingestion-inventory and
@@ -116,7 +199,15 @@ cost/budget) are already satisfied — it does not re-decide them.**
    complete pilot offboarding can ever be guaranteed
    (`docs/pilots/ingestion-pilot-runbook.md` §16 names this as a hard
    blocker; it must never rely solely on customer-retained
-   `ingestion_id`s).
+   `ingestion_id`s). **Implemented in Phase 4G-A**
+   (`src/cloudops_guard/ingestion_azure/inventory.py`,
+   `ops_cli.py tenant-offboard-plan`/`tenant-offboard-execute`) — never
+   relies on a customer-provided ID list (proven by a dedicated tabletop
+   test against a real database, `docs/deployment/
+   azure-ingestion-production.md` §8), tenant-identity double-entry,
+   exact confirmation phrase, and an append-only audit trail. Tested
+   against real PostgreSQL only — never yet exercised against a live
+   pilot customer's actual data.
 
 This checklist itself grants no authorization. It exists so that a
 future Phase 4G request can be checked against a concrete, written list

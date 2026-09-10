@@ -983,6 +983,102 @@ regardless of which milestone is currently in progress.
   been deployed, provisioned, tagged, or released; no credential or
   token has been issued; no GitHub Environment was created; no pilot
   customer has been onboarded; Phase 4G has not begun.**
+- **Phase 4G-A — Azure implementation and deployment tooling — has since
+  been implemented, uncommitted, pending independent review.** Recorded
+  human decisions this sub-phase implements (never makes): Microsoft
+  Azure, Canada Central (`canadacentral`), the managed-container Option
+  A architecture, Azure Container Apps (Consumption), Azure Container
+  Registry (Basic, admin disabled), Azure Database for PostgreSQL
+  Flexible Server (Burstable, single-zone, 32 GiB, 7-day backup
+  retention), Azure Blob Storage (private, managed-identity-only
+  access), a PostgreSQL-backed distributed limiter (no Azure Managed
+  Redis), a CAD $100/month before-tax alerting ceiling (never a hard
+  spending cap), and a ~CAD $46–72/month target pilot spend, priced
+  against Azure's own published Canada Central rates
+  (`docs/deployment/azure-ingestion-production.md` §5). Added a new
+  optional `azure-production` dependency extra
+  (`psycopg[binary,pool]`, `azure-storage-blob`, `azure-identity` — the
+  base CLI, the `api` extra, and the local/staging ingestion API remain
+  installable without it, proven by a real-subprocess import-boundary
+  test) and a new `src/cloudops_guard/ingestion_azure/` package: real
+  PostgreSQL `MetadataStore`/`TokenStore`/`AttemptLimiter`/
+  `RequestRateLimiter` adapters (a per-tenant `pg_advisory_xact_lock`
+  replacing `InMemoryMetadataStore`'s single process-wide lock —
+  *better* cross-tenant concurrency while preserving the exact same
+  "whole algorithm under one lock acquisition" guarantee, including the
+  exact `PurgeClaim` `(generation, claim_id)` ABA-safe identity), a real
+  Azure Blob Storage `ReportBlobStore` (managed-identity authentication
+  only, `put_if_absent` backed by Blob's own `If-None-Match: *`
+  conditional-create precondition), five forward-only, checksum-drift-
+  detecting, advisory-lock-serialized schema migrations, an HMAC-keyed
+  scope-key-hashing module (limiter keys are never stored in plaintext),
+  strict fail-closed production-environment-variable loading, a
+  production ASGI entrypoint (`entrypoint.py`), and an offline-only
+  operator CLI (`ops_cli.py`: migrations, retention sweep, purge,
+  limiter cleanup, tenant inventory, tenant offboarding — never wired
+  into the public HTTP API or the base `cloudops-guard` CLI). Resolved
+  Phase 4F's own recorded trusted-proxy blocker specifically for Azure
+  Container Apps' external HTTP ingress: researched and quoted Microsoft
+  Learn's own authoritative documentation (fetched 2026-09-09) that only
+  the *rightmost* `X-Forwarded-For` entry is the platform's own
+  observation, every other entry being caller-controlled and unsafe to
+  trust — implemented as `ingestion_azure.source_identifier.
+  resolve_azure_container_apps_client_address`, fails closed if the
+  header is missing/repeated/malformed, and wired in via a new,
+  backward-compatible, default-`None` `IngestionApiConfig.
+  source_identifier_resolver` field that leaves every existing Phase
+  4D/4F test and non-Azure deployment path completely unchanged.
+  Mutation-verified: reverting the rightmost-vs-leftmost trust decision
+  makes 5 adversarial tests fail for the intended reason. Added a
+  hardened, non-root (UID/GID 10001), digest-pinned, multi-stage
+  production `Dockerfile` (built and locally inspected this phase — not
+  merely authored: confirmed non-root user, exec-form entrypoint, the
+  five packaged migrations, absence of `pytest`/`ruff`, and a full
+  containerized boot proof against a real local PostgreSQL instance,
+  including fail-closed startup with no configuration, successful
+  startup and `GET /api/v1/capabilities` service once configured, and a
+  clean `SIGTERM` shutdown) and modular Bicep infrastructure-as-code
+  under `infra/azure/` (`foundation.bicep`/`app.bicep`, split so a first
+  deployment can create the registry before an image exists to
+  reference by digest) — compiled and linted with the real, standalone
+  Bicep CLI (zero warnings after two real fixes this phase's own
+  compilation caught: a `listKeys()`-in-a-cross-module-output linter
+  violation, and a missing ARM `criterionType` property on two metric-
+  alert criteria) and structurally tested (30 tests: region, network,
+  identity, SKU, replica, and cost constraints, including a positive
+  proof that no AKS/Redis/Front-Door/WAF/NAT-Gateway/Premium-ACR
+  resource exists anywhere in this infrastructure). Added a
+  manual-`workflow_dispatch`-only deployment/rollback workflow
+  (`.github/workflows/deploy-ingestion-azure.yml`, mirroring
+  `deploy-web.yml`'s own established pattern: exact confirmation phrase,
+  exact commit SHA, credential-free preflight validation, Azure
+  OIDC/workload-identity federation only, third-party actions pinned to
+  full commit SHAs — one of which this phase's own verification caught
+  wrong and corrected against the real upstream tag before use — a
+  digest-pinned deploy/rollback, and a post-deployment capabilities
+  health check with no "deploy anyway" fallback), validated with
+  `actionlint` and never dispatched. New test coverage: 182 new tests
+  under `tests/ingestion_azure/` (2639 total pytest, up from 2457) —
+  every Postgres/Azurite-dependent test runs against a real, local
+  PostgreSQL container and a real, local Azurite emulator (never a real
+  Azure account), including real concurrent-transaction proofs for
+  atomic dedup, tenant isolation, and purge-claim exclusivity (up to 30
+  concurrent workers), a real Azure-Blob conditional-create concurrency
+  proof, and the pilot runbook's own tabletop scenario (one tenant
+  ingestion ID missing from the customer's own records) proven against a
+  real database. `pip-audit` reports zero known vulnerabilities across
+  the full dependency set including every new package. **This sub-phase
+  creates no Azure resource, contacts no live Azure subscription, reads
+  no real credential, and does not dispatch the deployment workflow it
+  authors. No endpoint is live; no token exists; no customer data has
+  been uploaded; the static website (`web/`) remains a wholly separate,
+  unaffected service. Phase 4G-B (real provisioning, workflow dispatch,
+  deployment, smoke testing, token creation, and pilot onboarding) has
+  not begun** and requires its own separate, explicit, contemporaneous
+  authorization — see `docs/deployment/azure-ingestion-production.md`
+  §9/§11 for the complete provisioning checklist and every blocker that
+  remains, including an unexecuted disaster-recovery restore drill and a
+  placeholder monitoring-alert recipient address.
 - Do not introduce a database, web framework, cloud SDK (beyond the official
   Kubernetes client) or AI/LLM API until the relevant milestone requires it.
   (The v0.3.0 website's Astro/React/TypeScript stack is scoped to a separate
