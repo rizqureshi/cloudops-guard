@@ -50,6 +50,7 @@ LOCAL_REPORT_PRIVACY_ASTRO = (
 )
 README_MD = REPO_ROOT / "README.md"
 INGESTION_DEPLOYMENT_DOC = REPO_ROOT / "docs" / "deployment" / "ingestion-production.md"
+AZURE_DEPLOYMENT_DOC = REPO_ROOT / "docs" / "deployment" / "azure-ingestion-production.md"
 PILOT_RUNBOOK = REPO_ROOT / "docs" / "pilots" / "ingestion-pilot-runbook.md"
 PHASE_4G_CHECKLIST = REPO_ROOT / "docs" / "pilots" / "phase-4g-authorization-checklist.md"
 PHASE_4F_SECURITY_REVIEW = REPO_ROOT / "docs" / "reviews" / "v0.4.0-phase-4f-security-readiness.md"
@@ -98,6 +99,11 @@ def roadmap_text() -> str:
 @pytest.fixture(scope="module")
 def ingestion_deployment_doc_text() -> str:
     return _read(INGESTION_DEPLOYMENT_DOC)
+
+
+@pytest.fixture(scope="module")
+def azure_deployment_doc_text() -> str:
+    return _read(AZURE_DEPLOYMENT_DOC)
 
 
 @pytest.fixture(scope="module")
@@ -1795,3 +1801,166 @@ class TestPhase4FSecurityReviewDoesNotContradictItself:
         assert "must never be read as erasing or minimizing" in text
         assert "docs/deployment/ingestion-production.md" in text
         assert "§11" in text
+
+
+# --- Phase 4G-A correction pass: deployment-sequence ordering ---------------
+
+
+def _first_index(text: str, pattern: str, *, description: str) -> int:
+    """Finds the character offset of the first match of `pattern` in
+    whitespace-normalized `text` -- raises a clear assertion failure
+    (rather than a bare `None`/`-1`) if the anchor is missing entirely, so
+    an ordering test fails with an obvious "the anchor itself moved or was
+    reworded" message instead of a confusing index comparison against -1.
+    """
+    match = re.search(pattern, text, re.IGNORECASE)
+    assert match is not None, f"could not locate expected anchor ({description}): {pattern!r}"
+    return match.start()
+
+
+class TestDeploymentSequenceOrderingIsSafe:
+    """Correction pass: `docs/deployment/azure-ingestion-production.md` §9
+    previously instructed dispatching `deploy-ingestion-azure.yml`
+    (`action: plan`, then `action: deploy`) in what was then step 8,
+    *before* the following step (then step 9) ever configured the GitHub
+    variables/secrets/Environments/federated identities that workflow
+    reads -- including `secrets.SMOKE_TEST_TOKEN`, which `deploy`'s own
+    post-deployment smoke test requires. That ordering is both impossible
+    (the workflow cannot read configuration that does not exist yet) and
+    unsafe (a human could be misled into dispatching `deploy` before the
+    private Key Vault access decision, migrations, or the dedicated smoke
+    tenant even exist). This class proves the corrected ordering using
+    stable anchor phrases -- never a step number, which this same
+    correction pass's own renumbering (7b/8/9, up from the previous
+    7/8/9) would otherwise make these tests silently start passing for
+    the wrong reason after any future renumbering -- and normalizes
+    whitespace first, so harmless Markdown line-wrapping inside an anchor
+    phrase can never hide a real regression.
+    """
+
+    _GITHUB_CONFIG_ANCHOR = r"Configure the GitHub repository variables/secrets and Environments"
+    _ACTION_PLAN_DISPATCH_ANCHOR = r"Dispatch `action: plan` first"
+    _ACTION_DEPLOY_DISPATCH_ANCHOR = r"dispatch `action: deploy`"
+    _SMOKE_TOKEN_PROVISIONING_ANCHOR = (
+        r"provision a dedicated, non-production\s+\*\*synthetic smoke-test tenant\*\*"
+    )
+
+    def test_github_configuration_precedes_the_first_plan_dispatch_instruction(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        config_index = _first_index(
+            text, self._GITHUB_CONFIG_ANCHOR, description="GitHub configuration step"
+        )
+        plan_index = _first_index(
+            text, self._ACTION_PLAN_DISPATCH_ANCHOR, description="first `action: plan` dispatch"
+        )
+        assert config_index < plan_index, (
+            "GitHub variables/secrets/Environments must be configured before the "
+            "workflow that reads them is ever dispatched with `action: plan`"
+        )
+
+    def test_action_plan_dispatch_precedes_action_deploy_dispatch(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        plan_index = _first_index(
+            text, self._ACTION_PLAN_DISPATCH_ANCHOR, description="first `action: plan` dispatch"
+        )
+        deploy_index = _first_index(
+            text, self._ACTION_DEPLOY_DISPATCH_ANCHOR, description="first `action: deploy` dispatch"
+        )
+        assert plan_index < deploy_index, (
+            "`action: plan` must be dispatched and reviewed before `action: deploy` "
+            "is ever dispatched"
+        )
+
+    def test_plan_and_deploy_require_distinct_approvals(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        assert re.search(
+            r"separate, contemporaneous human\s+authorization made specifically to deploy",
+            text,
+            re.IGNORECASE,
+        ), "expected an explicit requirement for a separate, deploy-specific authorization"
+        assert re.search(
+            r"[Aa]pprov(?:ing|al of) `plan` is never standing authorization for `deploy`",
+            text,
+        ), (
+            "expected an explicit statement that approving `plan` never doubles as "
+            "authorization for `deploy`"
+        )
+
+    def test_smoke_test_token_is_provisioned_before_action_deploy(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        provision_index = _first_index(
+            text,
+            self._SMOKE_TOKEN_PROVISIONING_ANCHOR,
+            description="synthetic smoke-test tenant/token provisioning",
+        )
+        first_smoke_token_mention_index = _first_index(
+            text, r"SMOKE_TEST_TOKEN", description="first SMOKE_TEST_TOKEN mention"
+        )
+        deploy_index = _first_index(
+            text, self._ACTION_DEPLOY_DISPATCH_ANCHOR, description="first `action: deploy` dispatch"
+        )
+        assert provision_index < deploy_index, (
+            "the dedicated synthetic smoke-test tenant/token must be provisioned "
+            "before `action: deploy` is ever dispatched"
+        )
+        assert first_smoke_token_mention_index < deploy_index, (
+            "SMOKE_TEST_TOKEN must be configured before `action: deploy` is ever dispatched"
+        )
+
+    def test_private_key_vault_operator_access_decision_remains_unresolved(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        assert re.search(r"[Uu]nresolved Phase 4G-B precondition", text), (
+            "expected the private Key Vault operator-access decision to remain "
+            "explicitly, textually unresolved -- this pass must not select a "
+            "mechanism"
+        )
+        assert "A human must explicitly choose one of these" in text
+
+    def test_cost_budget_decision_remains_unresolved(self, phase_4g_checklist_text: str) -> None:
+        text = _normalize_whitespace(phase_4g_checklist_text)
+        assert re.search(r"UNRESOLVED as of this correction pass", text), (
+            "expected the cost/budget precondition to remain explicitly unresolved "
+            "-- this pass must not approve a budget or ceiling"
+        )
+
+    def test_no_instruction_permits_temporarily_enabling_public_key_vault_access(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        """Duplicates, deliberately, the equivalent guarantee already
+        enforced by `tests/test_keyvault_operator_access_docs.py` for this
+        same document -- kept here too so this file's own ordering-focused
+        class is a single, complete statement of every guarantee this
+        correction pass's own task named, without requiring a reader to
+        cross-reference a second test file to confirm this one holds.
+        """
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        negation_pattern = re.compile(r"never|not\b|don't|must never", re.IGNORECASE)
+        for match in re.finditer(r"enable[^.]{0,60}public[^.]{0,30}access", text, re.IGNORECASE):
+            window = text[max(0, match.start() - 80) : match.start()]
+            assert negation_pattern.search(window), (
+                f"found an unqualified instruction to enable public Key Vault access: "
+                f"{match.group(0)!r}"
+            )
+
+    def test_no_ordinary_github_hosted_runner_is_presented_as_reaching_the_vault(
+        self, azure_deployment_doc_text: str
+    ) -> None:
+        text = _normalize_whitespace(azure_deployment_doc_text)
+        assert re.search(
+            r"no ordinary local (?:machine )?or github-hosted (?:execution|runner)",
+            text,
+            re.IGNORECASE,
+        ), (
+            "expected an explicit disclaimer that ordinary local/GitHub-hosted "
+            "execution cannot reach the private Key Vault"
+        )

@@ -549,19 +549,24 @@ group).
    the running application's own identity if that role is granted
    `INSERT` on `tokens`) to persist it — never the plaintext secret
    anywhere but the customer's own secure delivery channel.
-8. Run `deploy-ingestion-azure.yml` (`action: plan`, then `action:
-   deploy`), following its own confirmation-phrase/exact-SHA/protected-
-   Environment gates. **Correction pass, item 3**: `build` only computes
-   the image's real content digest, entirely offline, and never pushes
-   anything; `plan` only compares (`what-if`) against that digest, also
-   never pushing; `deploy` is the *only* job that ever pushes the image
-   (via a pinned, OCI-native tool, `crane` — never `docker push`, which
-   does not preserve the pre-computed manifest digest), and only after
-   `verify`/`plan` have both succeeded and this job's own protected
-   `production` Environment approval has been granted.
-9. Configure the GitHub repository variables/secrets and Environments
+7b. **Correction pass — deployment-sequence ordering**: using that same
+    procedure, separately provision a dedicated, non-production
+    **synthetic smoke-test tenant** (a tenant ID distinct from any real
+    pilot customer, e.g. `cog-smoke-test-tenant`) and its own token,
+    scoped to `reports:write`/`reports:read`/`reports:delete` only —
+    never a real customer's token, and never reused from step 7 above.
+    This token becomes `secrets.SMOKE_TEST_TOKEN`, configured in step 8
+    below, and **must exist before `deploy` (step 9) ever runs**: that
+    job's own post-deployment smoke test
+    (`scripts/smoke_test_payload.py`, a real POST→GET→DELETE cycle
+    against the freshly deployed service) authenticates with it and
+    fails the deployment if it is missing or invalid.
+8. Configure the GitHub repository variables/secrets and Environments
    this workflow reads (never present in this repository as real
-   values):
+   values). **Every item below must exist and be validated before step 9
+   dispatches this workflow for the first time — `plan` and `deploy`
+   both read from these, so neither can run correctly, or safely, before
+   this step completes:**
    - `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`.
    - `AZURE_PLAN_CLIENT_ID` — **never describe or provision this as
      "Reader-scoped" or read-only** (corrected a second time in this
@@ -654,9 +659,31 @@ group).
      compatibility gate (§1 above) queries this workspace directly.
    - `secrets.POSTGRES_ADMIN_PASSWORD` (used only by the read-only
      `plan` job's own foundation `what-if` call).
-   - `secrets.SMOKE_TEST_TOKEN` (a separately-provisioned, non-
-     production-data smoke tenant's own token — never a real customer
-     token).
+   - `secrets.SMOKE_TEST_TOKEN` — the dedicated, non-production synthetic
+     smoke tenant's own token provisioned in step 7b above; never a real
+     customer token, and never reused from step 7's own pilot token.
+9. Run `deploy-ingestion-azure.yml`, in two separate, explicitly
+   authorized stages — never combined into one implicit action, and only
+   once step 8 above has been fully completed and validated:
+   1. **Dispatch `action: plan` first, and have its result reviewed by a
+      human.** `build` only computes the image's real content digest,
+      entirely offline, and never pushes anything; `plan` only compares
+      (`what-if`) against that digest and the live infrastructure, also
+      never pushing or mutating anything.
+   2. **Only after that review, and a separate, contemporaneous human
+      authorization made specifically to deploy — never inferred from
+      having approved `plan` — dispatch `action: deploy`.** Approving
+      `plan` is never standing authorization for `deploy`; each dispatch
+      requires its own decision. **Correction pass, item 3** (unchanged):
+      `deploy` is the *only* job that ever pushes the image (via a
+      pinned, OCI-native tool, `crane` — never `docker push`, which does
+      not preserve the pre-computed manifest digest), and it runs only
+      after `verify`/`plan` have both succeeded **and** this job's own
+      protected `production` Environment approval has been separately
+      granted at dispatch time.
+
+   Both stages follow the workflow's own confirmation-phrase/exact-SHA
+   gates.
 10. Execute the §7 restore-test drill at least once before onboarding a
     real pilot customer.
 11. Complete a real pilot customer's written consent
